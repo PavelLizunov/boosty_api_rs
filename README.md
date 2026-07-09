@@ -49,11 +49,11 @@ Use with caution in production environments and pin specific versions if needed.
 
 ### 🔁 Retry Behavior
 
-The client automatically retries HTTP requests that fail due to transient network errors or expired access tokens.
-
-- Retry logic is centralized in the `get_request()` method.
-- On token expiration, the client performs a refresh (if refresh-token and device ID are set) and retries the request.
-- Other error types (like 4xx or business-logic errors) are not retried.
+- All requests go through a single authorized-send path.
+- Before each request the access token is refreshed proactively when it is about to expire.
+- If the server still answers `401 Unauthorized` and the refresh flow (refresh token + device ID) is configured, the client forces a token refresh and retries the request once.
+- Multipart requests (e.g. `create_comment`) stream their body and are not retried.
+- Other error statuses (4xx/5xx) are not retried.
 
 ### 📝 Post API
 
@@ -79,7 +79,7 @@ The client automatically retries HTTP requests that fail due to transient networ
 
 ### 📜 Subscriptions
 
-- Get subscription levels via `get_subscription_levels(blog_name, show_free_level)`.
+- Get subscription levels via `get_blog_subscription_levels(blog_name, show_free_level)`.
 - Get current user subscriptions via `get_user_subscriptions(limit, with_follow)`, returning a paginated
   `SubscriptionsResponse`.
 
@@ -260,7 +260,15 @@ api_client.set_bearer_token("access-token").await?;
 api_client.set_refresh_token_and_device_id("refresh-token", "device-id").await?;
 ```
 
-If a post is unavailable and refresh credentials are present, the client will automatically attempt a refresh.
+With refresh credentials present, the client refreshes the access token before requests as needed and retries once on `401 Unauthorized`.
+
+The Boosty API rotates the refresh token on every successful refresh. Read the current value via `api_client.refresh_token().await` and persist it if you need to authenticate again after a restart:
+
+```rust
+if let Some(current_refresh_token) = api_client.refresh_token().await {
+    // save it alongside your device-id for the next run
+}
+```
 
 ## Crate Structure
 

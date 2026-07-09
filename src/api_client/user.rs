@@ -22,8 +22,7 @@ impl ApiClient {
     ///
     /// - `ApiError::Unauthorized` if the HTTP status is 401 Unauthorized.
     /// - `ApiError::HttpRequest` if the network request fails.
-    /// - `ApiError::JsonParse` if the HTTP response cannot be parsed as JSON.
-    /// - `ApiError::Deserialization` if the JSON cannot be deserialized into `SubscriptionsResponse`.
+    /// - `ApiError::JsonParseDetailed` if the body cannot be parsed into a `SubscriptionsResponse`.
     pub async fn get_user_subscriptions(
         &self,
         limit: Option<u32>,

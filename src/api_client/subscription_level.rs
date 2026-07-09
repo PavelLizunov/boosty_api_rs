@@ -19,8 +19,7 @@ impl ApiClient {
     /// # Errors
     ///
     /// - `ApiError::HttpRequest` if the network request fails.
-    /// - `ApiError::JsonParse` if the HTTP response cannot be parsed as JSON.
-    /// - `ApiError::Deserialization` if the body cannot be deserialized into `SubscriptionLevelResponse`.
+    /// - `ApiError::JsonParseDetailed` if the body cannot be parsed into a `SubscriptionLevelResponse`.
     pub async fn get_blog_subscription_levels(
         &self,
         blog_name: &str,

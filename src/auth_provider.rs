@@ -18,7 +18,6 @@ struct RefreshResponse {
 }
 
 /// Internal state for authentication.
-#[derive(Debug)]
 struct AuthState {
     /// Static access token, if set via `set_access_token_only`.
     static_access_token: Option<String>,
@@ -30,6 +29,22 @@ struct AuthState {
     access_token: Option<String>,
     /// Expiration instant for `access_token`.
     expires_at: Option<Instant>,
+}
+
+/// Manual Debug: never print credential values, only whether they are set.
+impl std::fmt::Debug for AuthState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn redact(value: &Option<String>) -> &'static str {
+            if value.is_some() { "Some(***)" } else { "None" }
+        }
+        f.debug_struct("AuthState")
+            .field("static_access_token", &redact(&self.static_access_token))
+            .field("device_id", &redact(&self.device_id))
+            .field("refresh_token", &redact(&self.refresh_token))
+            .field("access_token", &redact(&self.access_token))
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
 }
 
 /// Provider managing authentication: either static token or refresh-token flow.
@@ -157,6 +172,26 @@ impl AuthProvider {
         }
     }
 
+    /// Force a token refresh regardless of the locally tracked expiry.
+    ///
+    /// Used when the server rejects a token that still looks valid locally.
+    /// Returns `AuthError::MissingCredentials` if the refresh flow is not configured.
+    pub async fn force_refresh(&self) -> ResultAuth<()> {
+        let mut st = self.state.lock().await;
+        if st.refresh_token.is_none() || st.device_id.is_none() {
+            return Err(AuthError::MissingCredentials);
+        }
+        self.refresh_internal(&mut st).await
+    }
+
+    /// Current refresh token, if the refresh flow is configured.
+    ///
+    /// The server rotates it on every successful refresh; expose it so callers
+    /// can persist the rotated value.
+    pub async fn refresh_token(&self) -> Option<String> {
+        self.state.lock().await.refresh_token.clone()
+    }
+
     /// Internal method to perform token refresh via HTTP request.
     ///
     /// Updates `st.access_token`, `st.refresh_token`, and `st.expires_at`.
@@ -189,9 +224,9 @@ impl AuthProvider {
         let data: RefreshResponse = resp.json().await.map_err(AuthError::HttpRequest)?;
         let now = Instant::now();
 
-        st.access_token = Some(data.access_token.clone());
-        st.refresh_token = Some(data.refresh_token.clone());
-        st.expires_at = Some(now + Duration::from_secs(data.expires_in as u64));
+        st.access_token = Some(data.access_token);
+        st.refresh_token = Some(data.refresh_token);
+        st.expires_at = Some(now + Duration::from_secs(data.expires_in.max(0) as u64));
         Ok(())
     }
 

@@ -1,6 +1,7 @@
 use std::fs;
 
 use boosty_api::{api_client::ApiClient, error::ApiError};
+use mockito::Matcher;
 use reqwest::{Client, header::CONTENT_TYPE};
 use serde_json::{Value, json};
 
@@ -77,67 +78,79 @@ async fn test_get_post_not_available_but_no_refresh() {
 }
 
 #[tokio::test]
-async fn test_get_post_with_refresh() {
+async fn test_get_post_retries_after_refresh_on_401() {
     let (mut server, base) = setup().await;
-    let req_client = Client::new();
-    let client = ApiClient::new(req_client.clone(), &base);
+    let client = ApiClient::new(Client::new(), &base);
 
     client
-        .set_refresh_token_and_device_id("old_refresh", "device123")
+        .set_refresh_token_and_device_id("r1", "device123")
         .await
         .unwrap();
+
+    // First refresh (pre-request, no cached token yet): r1 -> tok1/r2.
+    server
+        .mock("POST", "/oauth/token/")
+        .match_body(Matcher::UrlEncoded("refresh_token".into(), "r1".into()))
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(
+            json!({"access_token":"tok1","refresh_token":"r2","expires_in":3600}).to_string(),
+        )
+        .expect(1)
+        .create_async()
+        .await;
+
+    // Second refresh (forced by the 401) uses the rotated token: r2 -> tok2/r3.
+    server
+        .mock("POST", "/oauth/token/")
+        .match_body(Matcher::UrlEncoded("refresh_token".into(), "r2".into()))
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(
+            json!({"access_token":"tok2","refresh_token":"r3","expires_in":3600}).to_string(),
+        )
+        .expect(1)
+        .create_async()
+        .await;
 
     let blog = "blog";
     let post_id = "100";
     let api_get_path = api_path(&format!("blog/{blog}/post/{post_id}"));
 
+    // The server rejects the first token...
+    let rejected = server
+        .mock("GET", api_get_path.as_str())
+        .match_header("authorization", "Bearer tok1")
+        .with_status(401)
+        .expect(1)
+        .create_async()
+        .await;
+
+    // ...and accepts the refreshed one.
     let raw = fs::read_to_string("tests/fixtures/api_response_video_image.json").unwrap();
-    let mut first_value: Value = serde_json::from_str(&raw).unwrap();
-    first_value["id"] = Value::String(post_id.to_string());
-    first_value["title"] = Value::String("Old Title".to_string());
-    let first_body = first_value.to_string();
+    let mut value: Value = serde_json::from_str(&raw).unwrap();
+    value["id"] = Value::String(post_id.to_string());
+    value["title"] = Value::String("After retry".to_string());
 
-    server
+    let accepted = server
         .mock("GET", api_get_path.as_str())
+        .match_header("authorization", "Bearer tok2")
         .with_status(200)
         .with_header(CONTENT_TYPE, "application/json")
-        .with_body(first_body)
-        .expect(1)
-        .create_async()
-        .await;
-
-    let oauth_resp = json!({
-        "access_token": "new_access_token",
-        "refresh_token": "new_refresh_token",
-        "expires_in": 3600
-    })
-    .to_string();
-    server
-        .mock("POST", "/oauth/token/")
-        .with_status(200)
-        .with_header(CONTENT_TYPE, "application/json")
-        .with_body(oauth_resp)
-        .expect(1)
-        .create_async()
-        .await;
-
-    let mut second_value: Value = serde_json::from_str(&raw).unwrap();
-    second_value["id"] = Value::String(post_id.to_string());
-    second_value["title"] = Value::String("New Title".to_string());
-    let second_body = second_value.to_string();
-
-    server
-        .mock("GET", api_get_path.as_str())
-        .with_status(200)
-        .with_header(CONTENT_TYPE, "application/json")
-        .with_body(second_body)
+        .with_body(value.to_string())
         .expect(1)
         .create_async()
         .await;
 
     let result = client.get_post(blog, post_id).await.unwrap();
     assert_eq!(result.id, "100");
-    assert_eq!(result.title, Some(String::from("Old Title")));
+    assert_eq!(result.title, Some(String::from("After retry")));
+
+    // The rotated refresh token is exposed for persistence.
+    assert_eq!(client.refresh_token().await.as_deref(), Some("r3"));
+
+    rejected.assert_async().await;
+    accepted.assert_async().await;
 }
 
 #[tokio::test]

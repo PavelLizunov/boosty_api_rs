@@ -60,7 +60,7 @@ pub struct Promo {
     /// Access rights granted by this promo.
     pub access: Access,
     /// Activation counters for the promo.
-    pub count: Count,
+    pub count: PromoCount,
     /// Discount details associated with the promo.
     pub discount: Discount,
 }
@@ -79,7 +79,7 @@ pub struct Access {
 
 /// Activation limits for a promo campaign.
 #[derive(Deserialize, Debug)]
-pub struct Count {
+pub struct PromoCount {
     /// Number of times the promo has been activated.
     pub activation: u64,
     /// Maximum number of activations allowed, or `None` if unlimited.
@@ -90,8 +90,8 @@ pub struct Count {
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Discount {
-    /// Discounted price.
-    pub price: u64,
+    /// Discounted price. Fractional values occur on the live API.
+    pub price: f64,
     /// Discount percentage.
     pub percent: u32,
     /// Price equivalents in various currencies.

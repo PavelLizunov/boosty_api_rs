@@ -108,6 +108,13 @@ impl ApiClient {
 
             all_comments.extend(resp.data);
 
+            // Live-API semantics (verified against api.boosty.to, 2026-07): the
+            // extra flags are chronological, not directional. With the default
+            // ("top") order isFirst is true on every page and isLast flips to
+            // true on the final one; with "bottom" order it is mirrored
+            // (isLast always true, isFirst flips on the final page). So in
+            // either order the terminal page is exactly `is_first && is_last`;
+            // the empty-page check above stays as a safety net.
             if resp.extra.is_last && resp.extra.is_first {
                 break;
             }

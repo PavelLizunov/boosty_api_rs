@@ -7,7 +7,7 @@ use crate::model::Post;
 #[serde(rename_all = "camelCase")]
 pub struct ShowcaseResponse {
     pub data: ShowcaseData,
-    pub extra: Extra,
+    pub extra: ShowcaseExtra,
 }
 
 /// Showcase data
@@ -20,7 +20,7 @@ pub struct ShowcaseData {
 /// Showcase extra
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Extra {
+pub struct ShowcaseExtra {
     pub offset: i64,
     pub blog_id: i64,
     pub counters: Counters,

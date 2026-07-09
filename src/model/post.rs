@@ -13,14 +13,14 @@ use serde::Deserialize;
 pub struct PostsResponse {
     /// Array of post items.
     pub data: Vec<Post>,
-    /// Extra.
-    pub extra: Extra,
+    /// Pagination info (offset, is_last).
+    pub extra: PostsExtra,
 }
 
-/// Extra (offset, is_last).
+/// Posts pagination info (offset, is_last).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Extra {
+pub struct PostsExtra {
     pub offset: String,
     pub is_last: bool,
 }
@@ -65,8 +65,9 @@ pub struct Post {
     pub title: Option<String>,
     /// Sorting order index.
     pub sort_order: i64,
-    /// Price to access the post (if any).
-    pub price: i32,
+    /// Price to access the post (if any). The live API returns fractional
+    /// values (e.g. `0.98`), so this must be a float.
+    pub price: f64,
     /// Unique post identifier.
     pub id: String,
     /// Comments associated with the post.

@@ -27,10 +27,10 @@ pub struct Subscription {
     pub parent_id: Option<u64>,
     /// Display name of the subscription.
     pub name: String,
-    /// Standard price (in base currency units).
-    pub price: u64,
+    /// Standard price (in base currency units). Fractional values occur on the live API.
+    pub price: f64,
     /// Custom price, if applied.
-    pub custom_price: u64,
+    pub custom_price: f64,
     /// Billing period in months.
     pub period: u8,
     /// Start timestamp (Unix epoch).
@@ -69,8 +69,8 @@ pub struct SubscriptionLevelInfo {
     pub id: u64,
     /// Name of the level.
     pub name: String,
-    /// Base price in main currency.
-    pub price: u64,
+    /// Base price in main currency. Fractional values occur on the live API.
+    pub price: f64,
     /// Price per currency (e.g., USD, EUR).
     pub currency_prices: HashMap<String, f64>,
     /// Whether the level has limited availability.

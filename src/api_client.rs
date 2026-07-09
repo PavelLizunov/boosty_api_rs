@@ -9,7 +9,7 @@ mod user;
 use crate::auth_provider::AuthProvider;
 use crate::error::{ApiError, ResultApi, ResultAuth};
 use reqwest::header::{ACCEPT, CACHE_CONTROL, HeaderMap, HeaderValue, USER_AGENT};
-use reqwest::{Client, Response, multipart};
+use reqwest::{Client, RequestBuilder, Response, StatusCode, multipart};
 
 /// Default number of posts to fetch per page.
 const DEFAULT_PAGE_SIZE: usize = 20;
@@ -164,6 +164,49 @@ impl ApiClient {
             .collect()
     }
 
+    /// Current refresh token, if the refresh flow is configured.
+    ///
+    /// Boosty rotates the refresh token on every successful refresh; persist
+    /// this value if you need to authenticate again after a restart.
+    pub async fn refresh_token(&self) -> Option<String> {
+        self.auth_provider.refresh_token().await
+    }
+
+    /// Internal: attach default + auth headers, send, and retry once on 401
+    /// via a forced token refresh when the refresh flow is configured.
+    ///
+    /// Requests with streaming bodies (multipart) cannot be cloned and are
+    /// sent without the retry.
+    async fn send_authorized(&self, builder: RequestBuilder) -> ResultApi<Response> {
+        let mut headers = self.headers.clone();
+        self.auth_provider.apply_auth_header(&mut headers).await?;
+        let builder = builder.headers(headers);
+        let retry_builder = builder.try_clone();
+
+        let response = builder.send().await.map_err(ApiError::HttpRequest)?;
+
+        if response.status() == StatusCode::UNAUTHORIZED
+            && self.auth_provider.has_refresh_and_device_id().await
+            && let Some(retry) = retry_builder
+        {
+            self.auth_provider.force_refresh().await?;
+            let mut headers = self.headers.clone();
+            self.auth_provider.apply_auth_header(&mut headers).await?;
+            return retry
+                .headers(headers)
+                .send()
+                .await
+                .map_err(ApiError::HttpRequest);
+        }
+
+        Ok(response)
+    }
+
+    /// Internal: build the full URL for a relative API path under `/v1/`.
+    fn url(&self, path: &str) -> String {
+        format!("{}/v1/{}", self.base_url, path)
+    }
+
     /// Internal: perform a GET request to given API path, applying auth header.
     ///
     /// # Parameters
@@ -174,16 +217,7 @@ impl ApiClient {
     ///
     /// On success, returns `reqwest::Response`. On network error, returns `ApiError::HttpRequest`.
     async fn get_request(&self, path: &str) -> ResultApi<Response> {
-        let mut headers = self.headers.clone();
-        self.auth_provider.apply_auth_header(&mut headers).await?;
-
-        let url = format!("{}/v1/{}", self.base_url, path);
-        self.client
-            .get(&url)
-            .headers(headers)
-            .send()
-            .await
-            .map_err(ApiError::HttpRequest)
+        self.send_authorized(self.client.get(self.url(path))).await
     }
 
     /// Internal: perform a POST request with optional form or JSON body.
@@ -198,7 +232,7 @@ impl ApiClient {
     ///
     /// # Returns
     ///
-    /// On success, returns a `reqwest::Response`.  
+    /// On success, returns a `reqwest::Response`.
     /// On network failure, returns [`ApiError::HttpRequest`].
     async fn post_request<T: serde::Serialize + ?Sized>(
         &self,
@@ -206,25 +240,19 @@ impl ApiClient {
         body: &T,
         as_form: bool,
     ) -> ResultApi<Response> {
-        let mut headers = self.headers.clone();
-        self.auth_provider.apply_auth_header(&mut headers).await?;
-
-        let url = format!("{}/v1/{}", self.base_url, path);
-
-        let builder = self.client.post(&url).headers(headers);
-
-        let request = if as_form {
+        let builder = self.client.post(self.url(path));
+        let builder = if as_form {
             builder.form(body)
         } else {
             builder.json(body)
         };
-
-        request.send().await.map_err(ApiError::HttpRequest)
+        self.send_authorized(builder).await
     }
 
     /// Internal: perform a POST request with multipart form.
     ///
     /// Automatically applies authentication headers and prepends the base URL (`/v1/` prefix).
+    /// Multipart bodies are streamed, so these requests are not retried on 401.
     ///
     /// # Parameters
     ///
@@ -233,19 +261,11 @@ impl ApiClient {
     ///
     /// # Returns
     ///
-    /// On success, returns a `reqwest::Response`.  
+    /// On success, returns a `reqwest::Response`.
     /// On network failure, returns [`ApiError::HttpRequest`].
     async fn post_multipart(&self, path: &str, form: multipart::Form) -> ResultApi<Response> {
-        let mut headers = self.headers.clone();
-        self.auth_provider.apply_auth_header(&mut headers).await?;
-
-        headers.remove("Content-Type");
-
-        let url = format!("{}/v1/{}", self.base_url, path);
-
-        let request = self.client.post(&url).headers(headers).multipart(form);
-
-        request.send().await.map_err(ApiError::HttpRequest)
+        self.send_authorized(self.client.post(self.url(path)).multipart(form))
+            .await
     }
 
     /// Internal: perform a DELETE request to the given API path.
@@ -258,20 +278,11 @@ impl ApiClient {
     ///
     /// # Returns
     ///
-    /// On success, returns a `reqwest::Response`.  
+    /// On success, returns a `reqwest::Response`.
     /// On network failure, returns [`ApiError::HttpRequest`].
     async fn delete_request(&self, path: &str) -> ResultApi<Response> {
-        let mut headers = self.headers.clone();
-        self.auth_provider.apply_auth_header(&mut headers).await?;
-
-        let url = format!("{}/v1/{}", self.base_url, path);
-
-        self.client
-            .delete(&url)
-            .headers(headers)
-            .send()
+        self.send_authorized(self.client.delete(self.url(path)))
             .await
-            .map_err(ApiError::HttpRequest)
     }
 
     /// Internal: perform a PUT request with optional form or JSON body.
@@ -286,7 +297,7 @@ impl ApiClient {
     ///
     /// # Returns
     ///
-    /// On success, returns a `reqwest::Response`.  
+    /// On success, returns a `reqwest::Response`.
     /// On network failure, returns [`ApiError::HttpRequest`].
     async fn put_request<T: serde::Serialize + ?Sized>(
         &self,
@@ -294,19 +305,12 @@ impl ApiClient {
         body: &T,
         as_form: bool,
     ) -> ResultApi<Response> {
-        let mut headers = self.headers.clone();
-        self.auth_provider.apply_auth_header(&mut headers).await?;
-
-        let url = format!("{}/v1/{}", self.base_url, path);
-
-        let builder = self.client.put(&url).headers(headers);
-
-        let request = if as_form {
+        let builder = self.client.put(self.url(path));
+        let builder = if as_form {
             builder.form(body)
         } else {
             builder.json(body)
         };
-
-        request.send().await.map_err(ApiError::HttpRequest)
+        self.send_authorized(builder).await
     }
 }

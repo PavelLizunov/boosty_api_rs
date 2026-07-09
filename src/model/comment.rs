@@ -12,13 +12,17 @@ use crate::{
 #[serde(rename_all = "camelCase")]
 pub struct CommentsResponse {
     pub data: Vec<Comment>,
-    pub extra: Extra,
+    pub extra: CommentsExtra,
 }
 
-/// Extra flags container.
+/// Comments pagination flags.
+///
+/// The flags are chronological, not directional: `is_first` refers to the
+/// oldest end of the thread and `is_last` to the newest; the terminal page
+/// of a paginated fetch has both set to `true` regardless of order.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Extra {
+pub struct CommentsExtra {
     pub is_first: bool,
     pub is_last: bool,
 }
@@ -69,7 +73,7 @@ pub struct Author {
 #[serde(rename_all = "camelCase")]
 pub struct Replies {
     pub data: Vec<Comment>,
-    pub extra: Extra,
+    pub extra: CommentsExtra,
 }
 
 impl IsAvailable for Comment {
