@@ -1,9 +1,11 @@
 mod bundle;
 mod comment;
 mod common;
+mod dialog;
 mod post;
 mod reaction;
 mod showcase;
+mod subscriber;
 mod subscription;
 mod subscription_level;
 mod tag;
@@ -16,6 +18,13 @@ pub use bundle::{
 };
 
 pub use common::{ContentCounter, CurrencyPrices, Thumbnail};
+
+pub use dialog::{
+    AttachmentCount, Chatmate, Dialog, DialogsExtra, DialogsResponse, MediaAttachmentCount,
+    Message, MessageAttachments, MessagesExtra, MessagesResponse,
+};
+
+pub use subscriber::{LevelFlags, Subscriber, SubscriberLevel, SubscribersResponse};
 
 pub use post::{
     AudioData, Comments, Count, Donators, ExtraFlag, FileData, Flags, ImageData, LinkData,

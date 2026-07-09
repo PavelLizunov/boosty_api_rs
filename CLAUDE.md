@@ -16,7 +16,15 @@ match the *live* API — every claimed behavior is backed by a test.
 | Phase | Status | Notes |
 |---|---|---|
 | 0 — Audit + hardening | done | deps, retry-on-401, token safety, live contract tests |
-| 1 — New features | proposed | per user's upcoming tasks |
+| 1 — Messages + subscribers | done | dialogs/messages + own-blog subscribers, verified live |
+| 2 — New features | proposed | per user's upcoming tasks |
+
+Live-verified endpoints (2026-07): dialogs `GET /v1/dialog/`,
+messages `GET /v1/dialog/{id}/message/` (offset = last msg id, stop on
+`isLast`), subscribers `GET /v1/blog/{blog}/subscribers` (NO trailing
+slash — the slashed path 404s; offset-based, `sort_by`/`order` optional).
+Own blog url comes from `GET /v1/user/current` → `blogUrl` (not modeled;
+the live test reads it raw).
 
 ## 3. Workflow rules (BLOCKING)
 

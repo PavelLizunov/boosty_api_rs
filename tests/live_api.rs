@@ -52,6 +52,32 @@ async fn authorized_client() -> Option<ApiClient> {
     Some(client)
 }
 
+/// Resolve the token owner's own blog slug via a raw `/user/current` call
+/// (the crate doesn't model the full profile; the test only needs blogUrl).
+async fn own_blog_url() -> Option<String> {
+    let secrets = load_secrets()?;
+    if secrets.access_token.is_empty() {
+        return None;
+    }
+    #[derive(Deserialize)]
+    struct Current {
+        #[serde(rename = "blogUrl")]
+        blog_url: String,
+    }
+    Client::new()
+        .get(format!("{BASE_URL}/v1/user/current"))
+        .bearer_auth(&secrets.access_token)
+        .header("User-Agent", "Mozilla/5.0")
+        .send()
+        .await
+        .ok()?
+        .json::<Current>()
+        .await
+        .ok()
+        .map(|c| c.blog_url)
+        .filter(|u| !u.is_empty())
+}
+
 /// Distinguish "model is wrong" (must fail the test) from "no access /
 /// endpoint quirk" (fine on foreign blogs).
 fn is_model_error(e: &ApiError) -> bool {
@@ -190,6 +216,83 @@ async fn live_auth_subscribed_posts_and_bundles_parse() {
     }
 
     assert!(errors.is_empty(), "live auth parse failures:\n{errors:#?}");
+}
+
+/// AUTH: dialogs + messages — the only live coverage for the
+/// Dialog/Chatmate/Message models.
+#[tokio::test]
+#[ignore = "hits the live Boosty API; needs .secrets/boosty.json"]
+async fn live_auth_dialogs_and_messages_parse() {
+    let Some(client) = authorized_client().await else {
+        println!("SKIPPED: no access_token in .secrets/boosty.json");
+        return;
+    };
+
+    let dialogs = match client.get_dialogs(Some(20), None).await {
+        Ok(d) => d,
+        Err(e) => panic!("dialogs failed: {e}"),
+    };
+    println!(
+        "parsed {} dialogs (total={})",
+        dialogs.data.len(),
+        dialogs.extra.total
+    );
+
+    let mut checked = 0usize;
+    for dialog in dialogs.data.iter().take(5) {
+        match client.get_all_dialog_messages(dialog.id, Some(30)).await {
+            Ok(messages) => {
+                checked += 1;
+                // Content extraction must not panic on any real message.
+                for m in &messages {
+                    let _ = m.extract_content();
+                }
+                println!(
+                    "dialog {} with {}: parsed {} messages",
+                    dialog.id,
+                    dialog.chatmate.name,
+                    messages.len()
+                );
+            }
+            Err(e) => panic!("messages for dialog {} failed: {e}", dialog.id),
+        }
+    }
+    println!("checked messages in {checked} dialogs");
+}
+
+/// AUTH: own-blog subscribers — the only live coverage for the
+/// Subscriber/SubscriberLevel models. Skips gracefully if the account
+/// has no blog / no subscribers.
+#[tokio::test]
+#[ignore = "hits the live Boosty API; needs .secrets/boosty.json"]
+async fn live_auth_subscribers_parse() {
+    let Some(client) = authorized_client().await else {
+        println!("SKIPPED: no access_token in .secrets/boosty.json");
+        return;
+    };
+
+    // The subscribers endpoint is for the caller's OWN blog; resolve it.
+    let Some(blog) = own_blog_url().await else {
+        println!("SKIPPED: could not resolve own blog url");
+        return;
+    };
+
+    match client
+        .get_all_subscribers(&blog, Some("on_time"), Some("gt"))
+        .await
+    {
+        Ok(subs) => {
+            for s in &subs {
+                // touch nested level so a bad SubscriberLevel would surface
+                let _ = s.level.currency_prices.len();
+            }
+            println!("{blog}: parsed {} subscribers", subs.len());
+        }
+        Err(ApiError::HttpStatus { status, .. }) if status.as_u16() == 404 => {
+            println!("SKIPPED: {blog} has no subscribers endpoint (not a blogger?)");
+        }
+        Err(e) => panic!("subscribers failed: {e}"),
+    }
 }
 
 /// AUTH + OPT-IN: real refresh flow. CONSUMES the stored refresh token

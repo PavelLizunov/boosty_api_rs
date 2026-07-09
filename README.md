@@ -93,6 +93,21 @@ Use with caution in production environments and pin specific versions if needed.
 - Get bundles via `get_bundles(blog_name)`.
 - Get bundle via `get_bundle(blog_name, bundle_id, query)`.
 
+### ✉️ Direct Messages
+
+- List dialogs via `get_dialogs(limit, offset)`.
+- Get one page of messages via `get_dialog_messages(dialog_id, limit, offset)`.
+- Get all messages in a dialog via `get_all_dialog_messages(dialog_id, limit)`.
+- Message content reuses `MediaData` and implements `HasContent`.
+
+### 👥 Subscribers
+
+- Get a page of your blog's subscribers via
+  `get_subscribers(blog_name, limit, offset, sort_by, order)`.
+- Get all subscribers via `get_all_subscribers(blog_name, sort_by, order)`.
+
+Both require an authenticated client that owns the blog.
+
 ### ⚙️ Low-level Features
 
 - Async-ready `ApiClient` using `reqwest`.

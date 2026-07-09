@@ -1,0 +1,47 @@
+{
+  "data": [
+    {
+      "id": 3323943,
+      "createdAt": 1736239576,
+      "unreadMsgCount": 0,
+      "chatmate": {
+        "id": 7597253,
+        "url": "el_kuzari",
+        "name": "El-Kuzari",
+        "currency": "RUB",
+        "blogCurrency": "RUB",
+        "acceptedCurrencies": ["RUB", "USD"],
+        "isOfficial": false,
+        "hasAvatar": true,
+        "avatarUrl": "https://images.boosty.to/user/7597253/avatar",
+        "hasAdultContent": false,
+        "isBlogger": true
+      },
+      "lastMessage": {
+        "id": 47991704,
+        "dialogId": 3323943,
+        "createdAt": 1783595925,
+        "authorId": 7597253,
+        "isRead": true,
+        "isPaid": false,
+        "isDeleted": false,
+        "isFeePaid": false,
+        "price": 0,
+        "previewType": "text",
+        "currencyPrices": { "RUB": 0, "USD": 0 },
+        "teaser": [],
+        "data": [
+          { "type": "text", "modificator": "", "content": "[\"Hi there\",\"unstyled\",[]]" }
+        ],
+        "attachments": {
+          "text": { "count": 1 },
+          "files": { "count": 0 },
+          "audios": { "count": 0 },
+          "images": { "count": 0, "previewUrl": "" },
+          "videos": { "count": 0, "previewUrl": "" }
+        }
+      }
+    }
+  ],
+  "extra": { "offset": 1, "total": 1 }
+}

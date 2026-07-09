@@ -1,7 +1,9 @@
 mod bundle;
 mod comment;
+mod dialog;
 mod post;
 mod showcase;
+mod subscriber;
 mod subscription_level;
 mod target;
 mod user;
