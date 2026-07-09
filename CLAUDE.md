@@ -91,3 +91,12 @@ Layer 5/6 (install/visual): N/A — this is a library.
   the Edit tool or `[System.IO.File]` with explicit UTF-8.
 - `tests/audit_probes.rs` is the regression suite from the 2026-07
   audit; each test documents a formerly-real bug. Keep them green.
+- Authenticated live tests read the gitignored `.secrets/boosty.json`
+  (`access_token`, `refresh_token`, `device_id`). To fill it: log in at
+  boosty.to → F12 → Application → Local Storage → https://boosty.to →
+  key `auth` holds `accessToken`/`refreshToken`, key `_clentId` is the
+  device id. Fill the file in an editor — NEVER paste tokens into chat;
+  tests never print them. `live_auth_refresh_flow` additionally needs
+  `BOOSTY_TEST_REFRESH=1` because it rotates the refresh token (it
+  writes the rotated value back to the file; the browser session that
+  produced it may need a re-login).
