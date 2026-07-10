@@ -6,6 +6,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
+/// Max chars of a failed-refresh response body kept in `AuthError::HttpStatus`.
+/// Enough to see the OAuth error code, short enough to not leak echoed params.
+const REFRESH_ERROR_BODY_MAX_CHARS: usize = 200;
+
 /// Response body for token refresh endpoint.
 #[derive(Deserialize)]
 struct RefreshResponse {
@@ -217,7 +221,16 @@ impl AuthProvider {
 
         if resp.status() != StatusCode::OK {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+            // Keep only a short prefix of the body: OAuth error responses may
+            // echo request parameters (incl. the refresh token), and this
+            // error's Display ends up in caller logs.
+            let body: String = resp
+                .text()
+                .await
+                .unwrap_or_default()
+                .chars()
+                .take(REFRESH_ERROR_BODY_MAX_CHARS)
+                .collect();
             return Err(AuthError::HttpStatus { status, body });
         }
 

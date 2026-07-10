@@ -1,4 +1,8 @@
-use crate::{api_client::ApiClient, error::ResultApi, model::ShowcaseResponse};
+use crate::{
+    api_client::{ApiClient, encode_segment},
+    error::ResultApi,
+    model::ShowcaseResponse,
+};
 
 impl ApiClient {
     /// Get blog showcase
@@ -24,7 +28,7 @@ impl ApiClient {
         only_visible: Option<bool>,
         offset: Option<u32>,
     ) -> ResultApi<ShowcaseResponse> {
-        let mut path = format!("blog/{blog_name}/showcase/");
+        let mut path = format!("blog/{}/showcase/", encode_segment(blog_name));
 
         let mut params = Vec::new();
         if let Some(o) = offset {
@@ -62,7 +66,7 @@ impl ApiClient {
     /// * `ApiError::HttpStatus` for other non-success HTTP statuses, with status and endpoint info.
     /// * `ApiError::HttpRequest` if the HTTP request fails.
     pub async fn change_showcase_status(&self, blog_name: &str, status: bool) -> ResultApi<()> {
-        let path = format!("blog/{blog_name}/showcase/status/");
+        let path = format!("blog/{}/showcase/status/", encode_segment(blog_name));
 
         let response = self
             .put_request(&path, &serde_json::json!({"is_enabled": status}), true)

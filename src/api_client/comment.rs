@@ -1,7 +1,7 @@
 use reqwest::multipart::{Form, Part};
 
 use crate::{
-    api_client::ApiClient,
+    api_client::{ApiClient, encode_segment},
     error::{ApiError, ResultApi},
     model::{Comment, CommentBlock, CommentsResponse},
 };
@@ -37,7 +37,11 @@ impl ApiClient {
         order: Option<&str>,
         offset: Option<u64>,
     ) -> ResultApi<CommentsResponse> {
-        let mut path = format!("blog/{blog_name}/post/{post_id}/comment/");
+        let mut path = format!(
+            "blog/{}/post/{}/comment/",
+            encode_segment(blog_name),
+            encode_segment(post_id)
+        );
 
         let mut params = Vec::new();
         if let Some(o) = offset {
@@ -50,7 +54,7 @@ impl ApiClient {
             params.push(format!("reply_limit={rl}"));
         }
         if let Some(ord) = order {
-            params.push(format!("order={ord}"));
+            params.push(format!("order={}", encode_segment(ord)));
         }
 
         if !params.is_empty() {
@@ -156,7 +160,11 @@ impl ApiClient {
         blocks: &[CommentBlock],
         reply_id: Option<u64>,
     ) -> ResultApi<Comment> {
-        let path = format!("blog/{blog_name}/post/{post_id}/comment/");
+        let path = format!(
+            "blog/{}/post/{}/comment/",
+            encode_segment(blog_name),
+            encode_segment(post_id)
+        );
 
         let mut form = Form::new().text("from_page", "blog");
 

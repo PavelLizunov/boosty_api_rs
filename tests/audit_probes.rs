@@ -198,6 +198,66 @@ async fn probe_get_posts_respects_limit() {
     );
 }
 
+/// PROBE 7: a failed token refresh must not carry the full server response
+/// body into the error Display — OAuth servers may echo request params
+/// (incl. the refresh token) in error descriptions, and this error string
+/// ends up in caller logs. Only a short prefix (200 chars) is kept.
+#[tokio::test]
+async fn probe_refresh_error_body_is_truncated() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    client
+        .set_refresh_token_and_device_id("r1", "d1")
+        .await
+        .unwrap();
+
+    // Marker sits beyond the 200-char limit, like an echoed token would.
+    let body = format!("{}LEAKED_REFRESH_TOKEN_ECHO", "x".repeat(250));
+    server
+        .mock("POST", "/oauth/token/")
+        .with_status(400)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(body)
+        .create_async()
+        .await;
+
+    let err = client
+        .get_post("b", "1")
+        .await
+        .expect_err("refresh against a 400 endpoint must fail");
+    let msg = format!("{err}");
+
+    assert!(
+        !msg.contains("LEAKED_REFRESH_TOKEN_ECHO"),
+        "LEAK: refresh error Display carries the full server body: {msg}"
+    );
+    assert!(
+        msg.contains("400"),
+        "error must still name the HTTP status: {msg}"
+    );
+}
+
+/// PROBE 8: string path segments are percent-encoded. Blog urls can come
+/// from API responses; without encoding, `/`, `?`, `#` in a value would
+/// reroute the request to a different endpoint (with the auth header
+/// attached). The mock only matches the ENCODED path.
+#[tokio::test]
+async fn probe_path_segments_are_percent_encoded() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    let encoded = server
+        .mock("GET", api_path("target/a%2Fb%3Fc%23d/").as_str())
+        .with_status(500) // routing is the point; the body never parses
+        .expect(1)
+        .create_async()
+        .await;
+
+    let _ = client.get_blog_targets("a/b?c#d").await;
+    encoded.assert_async().await; // fails if the raw path was requested
+}
+
 /// PROBE 6: Debug output of the client must not leak the bearer token.
 #[tokio::test]
 async fn probe_debug_does_not_leak_token() {

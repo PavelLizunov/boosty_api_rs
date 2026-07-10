@@ -1,4 +1,4 @@
-use crate::api_client::ApiClient;
+use crate::api_client::{ApiClient, encode_segment};
 use crate::error::ResultApi;
 use crate::model::{Subscriber, SubscribersResponse};
 
@@ -32,7 +32,7 @@ impl ApiClient {
         sort_by: Option<&str>,
         order: Option<&str>,
     ) -> ResultApi<SubscribersResponse> {
-        let mut path = format!("blog/{blog_name}/subscribers");
+        let mut path = format!("blog/{}/subscribers", encode_segment(blog_name));
         let mut params = Vec::new();
         if let Some(o) = offset {
             params.push(format!("offset={o}"));
@@ -41,10 +41,10 @@ impl ApiClient {
             params.push(format!("limit={l}"));
         }
         if let Some(sb) = sort_by {
-            params.push(format!("sort_by={sb}"));
+            params.push(format!("sort_by={}", encode_segment(sb)));
         }
         if let Some(ord) = order {
-            params.push(format!("order={ord}"));
+            params.push(format!("order={}", encode_segment(ord)));
         }
         if !params.is_empty() {
             path.push('?');

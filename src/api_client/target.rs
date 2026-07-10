@@ -1,4 +1,4 @@
-use crate::api_client::ApiClient;
+use crate::api_client::{ApiClient, encode_segment};
 use crate::error::ResultApi;
 use crate::model::{NewTarget, Target, TargetResponse, TargetType, UpdateTarget};
 
@@ -18,7 +18,7 @@ impl ApiClient {
     /// - `ApiError::HttpRequest` if the network request fails.
     /// - `ApiError::JsonParseDetailed` if the body cannot be parsed into a `TargetResponse`.
     pub async fn get_blog_targets(&self, blog_name: &str) -> ResultApi<TargetResponse> {
-        let path = format!("target/{blog_name}/");
+        let path = format!("target/{}/", encode_segment(blog_name));
 
         let response = self.get_request(&path).await?;
         let response = self.handle_response(&path, response).await?;

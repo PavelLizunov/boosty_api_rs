@@ -16,20 +16,45 @@ use reqwest::{Client, RequestBuilder, Response, StatusCode, multipart};
 /// Default number of posts to fetch per page.
 const DEFAULT_PAGE_SIZE: usize = 20;
 
+/// Percent-encode a value for interpolation into a URL path segment or query
+/// value (RFC 3986: unreserved characters pass through, everything else is
+/// `%XX`-encoded byte-wise). Values like blog urls can come from API
+/// responses; unencoded `/`, `?`, `#` in them would reroute the request.
+pub(crate) fn encode_segment(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 /// Client for interacting with Boosty API.
 ///
 /// Handles base URL, common headers, and delegates authentication to `AuthProvider`.
 /// Provides methods to get a single post or multiple posts.
+///
+/// Always build the `reqwest::Client` with timeouts: the token refresh runs
+/// under an internal lock, so with no timeout a single hung connection stalls
+/// every request on this client indefinitely.
 ///
 /// # Examples
 ///
 /// ```rust,no_run
 /// use boosty_api::api_client::ApiClient;
 /// use reqwest::Client;
+/// use std::time::Duration;
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let client = Client::new();
+///     let client = Client::builder()
+///         .connect_timeout(Duration::from_secs(10))
+///         .timeout(Duration::from_secs(30))
+///         .build()?;
 ///     let base_url = "https://api.example.com";
 ///     let api_client = ApiClient::new(client, base_url);
 ///
@@ -314,5 +339,20 @@ impl ApiClient {
             builder.json(body)
         };
         self.send_authorized(builder).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encode_segment;
+
+    #[test]
+    fn encode_segment_passes_unreserved_and_encodes_the_rest() {
+        assert_eq!(encode_segment("plain-slug_1.2~"), "plain-slug_1.2~");
+        assert_eq!(encode_segment("a/b?c#d"), "a%2Fb%3Fc%23d");
+        assert_eq!(
+            encode_segment("привет"),
+            "%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82"
+        );
     }
 }

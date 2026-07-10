@@ -1,4 +1,4 @@
-use crate::api_client::ApiClient;
+use crate::api_client::{ApiClient, encode_segment};
 use crate::error::ResultApi;
 use crate::model::SubscriptionLevelResponse;
 
@@ -25,7 +25,7 @@ impl ApiClient {
         blog_name: &str,
         show_free_level: Option<bool>,
     ) -> ResultApi<SubscriptionLevelResponse> {
-        let mut path = format!("blog/{blog_name}/subscription_level/");
+        let mut path = format!("blog/{}/subscription_level/", encode_segment(blog_name));
         if let Some(flag) = show_free_level {
             path.push_str(&format!("?show_free_level={flag}"));
         }

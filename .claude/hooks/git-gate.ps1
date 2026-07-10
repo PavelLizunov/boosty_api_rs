@@ -39,6 +39,13 @@ $ContractTestGate = @{
     Exe  = Join-Path $ToolchainBin "cargo.exe"
     Args = @("test", "--tests", "--quiet")
 }
+# Known-vulnerability scan of Cargo.lock (RustSec). Push-only: fetches the
+# advisory DB from the network.
+$AuditGate = @{
+    Name = "dependency audit"
+    Exe  = Join-Path $ToolchainBin "cargo.exe"
+    Args = @("audit")
+}
 
 # === HOOK LOGIC — usually no edits below ================================
 
@@ -112,10 +119,11 @@ Invoke-Gate $FmtCheckGate
 Invoke-Gate $LintGate
 Invoke-Gate $TypeCheckGate
 
-# --- Push-only: full test suite ----------------------------------------
+# --- Push-only: full test suite + dependency audit ---------------------
 if ($isPush) {
     Invoke-Gate $UnitTestGate
     Invoke-Gate $ContractTestGate
+    Invoke-Gate $AuditGate
 }
 
 [Console]::Error.WriteLine("[git-gate] All gating layers green. Proceeding with: $cmd")

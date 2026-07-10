@@ -112,7 +112,10 @@ Both require an authenticated client that owns the blog.
 
 ### ⚙️ Low-level Features
 
-- Async-ready `ApiClient` using `reqwest`.
+- Async-ready `ApiClient` using `reqwest`. Build the `Client` with
+  `connect_timeout` + `timeout` (see examples): token refresh runs under an
+  internal lock, and a hung connection without timeouts stalls every request
+  on the client.
 - Custom headers with real-world `User-Agent`, `DNT`, `Cache-Control`, etc.
 - Unified error types: `ApiError`, `AuthError` with detailed variants.
 
@@ -136,10 +139,16 @@ cargo add boosty_api
 ```rust
 use boosty_api::api_client::ApiClient;
 use reqwest::Client;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::new();
+    // Always set timeouts: the token refresh runs under an internal lock, so
+    // a single hung connection would otherwise stall the whole client.
+    let client = Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()?;
     let base_url = "https://api.example.com";
 
     let api_client = ApiClient::new(client, base_url);
@@ -162,10 +171,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```rust
 use boosty_api::api_client::ApiClient;
 use reqwest::Client;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::new();
+    // Always set timeouts: the token refresh runs under an internal lock, so
+    // a single hung connection would otherwise stall the whole client.
+    let client = Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()?;
     let base_url = "https://api.example.com";
 
     let api_client = ApiClient::new(client, base_url);

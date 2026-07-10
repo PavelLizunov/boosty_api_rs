@@ -13,7 +13,9 @@ $Gates = @(
     @{ Name = "Layer 1b: linter --strict";   Exe = Join-Path $ToolchainBin "cargo.exe"; Args = @("clippy", "--all-targets", "--", "-D", "warnings") },
     @{ Name = "Layer 2:  unit tests";        Exe = Join-Path $ToolchainBin "cargo.exe"; Args = @("test", "--lib", "--quiet") },
     # All offline integration tests; tests/live_api.rs is #[ignore]d and stays offline.
-    @{ Name = "Layer 3:  contract tests";    Exe = Join-Path $ToolchainBin "cargo.exe"; Args = @("test", "--tests", "--quiet") }
+    @{ Name = "Layer 3:  contract tests";    Exe = Join-Path $ToolchainBin "cargo.exe"; Args = @("test", "--tests", "--quiet") },
+    # Known-vulnerability scan of Cargo.lock (RustSec); fetches the advisory DB.
+    @{ Name = "Layer 4:  dependency audit";  Exe = Join-Path $ToolchainBin "cargo.exe"; Args = @("audit") }
 )
 
 # === RUNNER — usually no edits =========================================
@@ -35,5 +37,5 @@ function Run-Step($gate) {
 foreach ($g in $Gates) { Run-Step $g }
 
 Write-Host ""
-Write-Host "All gating layers green (offline). Live API canary: cargo test --test live_api -- --ignored --nocapture" -ForegroundColor Green
+Write-Host "All gating layers green. Live API canary: cargo test --test live_api -- --ignored --nocapture" -ForegroundColor Green
 exit 0

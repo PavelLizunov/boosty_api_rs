@@ -1,4 +1,4 @@
-use crate::api_client::{ApiClient, DEFAULT_PAGE_SIZE};
+use crate::api_client::{ApiClient, DEFAULT_PAGE_SIZE, encode_segment};
 use crate::error::ResultApi;
 use crate::model::{Post, PostsResponse};
 
@@ -21,7 +21,11 @@ impl ApiClient {
     /// - `ApiError::HttpRequest` if the HTTP request fails.
     /// - `ApiError::JsonParseDetailed` if the response body cannot be parsed into a `Post`.
     pub async fn get_post(&self, blog_name: &str, post_id: &str) -> ResultApi<Post> {
-        let path = format!("blog/{blog_name}/post/{post_id}");
+        let path = format!(
+            "blog/{}/post/{}",
+            encode_segment(blog_name),
+            encode_segment(post_id)
+        );
 
         let response = self.get_request(&path).await?;
         let response = self.handle_response(&path, response).await?;
@@ -66,9 +70,14 @@ impl ApiClient {
 
         loop {
             let current_limit = page_size.min(limit - all_posts.len());
-            let mut path = format!("blog/{blog_name}/post/?limit={current_limit}");
+            let mut path = format!(
+                "blog/{}/post/?limit={current_limit}",
+                encode_segment(blog_name)
+            );
+            // The offset string is echoed back from the previous response —
+            // server data, so it gets encoded like any other input.
             if let Some(ref off) = offset {
-                path.push_str(&format!("&offset={off}"));
+                path.push_str(&format!("&offset={}", encode_segment(off)));
             }
 
             let response = self.get_request(&path).await?;
