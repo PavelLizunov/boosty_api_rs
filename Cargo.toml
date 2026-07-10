@@ -14,7 +14,9 @@ documentation = "https://docs.rs/boosty_api"
 # The library itself only needs tokio::sync::Mutex; the full runtime and
 # macros are dev-only (tests, doc examples).
 tokio = { version = "1.52", features = ["sync"] }
-reqwest = { version = "0.13", features = ["json", "multipart", "form"] }
+# rustls (not native-tls): portable, and required to embed this client in
+# downstream workspaces that forbid openssl-sys / native-tls (e.g. vpnctl).
+reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "form", "rustls", "charset", "http2"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 serde_path_to_error = "0.1.20"
