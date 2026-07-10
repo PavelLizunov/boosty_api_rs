@@ -19,6 +19,10 @@ match the *live* API — every claimed behavior is backed by a test.
 | 1 — Messages + subscribers | done | dialogs/messages + own-blog subscribers, verified live |
 | 2 — New features | proposed | per user's upcoming tasks |
 
+Phase-2 north star — the Boosty↔vpnctl bridge — has a full self-contained
+handoff spec in `docs/IMPLEMENTATION.md` (crate as-built + bridge design,
+written for any agent incl. non-Claude).
+
 Live-verified endpoints (2026-07): dialogs `GET /v1/dialog/`,
 messages `GET /v1/dialog/{id}/message/` (offset = last msg id, stop on
 `isLast`), subscribers `GET /v1/blog/{blog}/subscribers` (NO trailing
