@@ -55,6 +55,17 @@ pub struct Subscriber {
     pub level: SubscriberLevel,
 }
 
+impl Subscriber {
+    /// Whether the subscription is currently active.
+    ///
+    /// Uses Boosty's own `status` field (`"active"` vs `"inactive"`), which is
+    /// the authoritative signal a provisioning bridge should key on: active →
+    /// the subscriber should have access; inactive → access should be paused.
+    pub fn is_active(&self) -> bool {
+        self.status.eq_ignore_ascii_case("active")
+    }
+}
+
 /// The subscription level attached to a subscriber.
 ///
 /// This is a lighter shape than [`crate::model::SubscriptionLevel`] — it has

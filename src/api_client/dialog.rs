@@ -1,6 +1,8 @@
+use reqwest::multipart::{Form, Part};
+
 use crate::api_client::ApiClient;
-use crate::error::ResultApi;
-use crate::model::{DialogsResponse, Message, MessagesResponse};
+use crate::error::{ApiError, ResultApi};
+use crate::model::{CommentBlock, DialogsResponse, Message, MessagesResponse};
 
 impl ApiClient {
     /// Get a page of the current user's dialogs (direct-message threads).
@@ -76,6 +78,58 @@ impl ApiClient {
         }
 
         let response = self.get_request(&path).await?;
+        let response = self.handle_response(&path, response).await?;
+
+        self.parse_json(response).await
+    }
+
+    /// Send a message into an existing dialog.
+    ///
+    /// Direct messages use the same content-block format as comments, so
+    /// [`CommentBlock`] is reused for the body (e.g.
+    /// `CommentBlock::text("hello")`). Requires an authenticated client.
+    ///
+    /// This targets an EXISTING dialog (`dialog_id`); opening a fresh dialog
+    /// with a subscriber who has never messaged is not covered here.
+    ///
+    /// # Arguments
+    ///
+    /// * `dialog_id` - the dialog to post into.
+    /// * `blocks` - the message content blocks.
+    ///
+    /// # Returns
+    ///
+    /// The created `Message`.
+    ///
+    /// # Errors
+    ///
+    /// - `ApiError::Unauthorized` if the HTTP status is 401 Unauthorized.
+    /// - `ApiError::HttpStatus` for other non-success HTTP statuses.
+    /// - `ApiError::HttpRequest` if the HTTP request fails.
+    /// - `ApiError::JsonParseDetailed` if the response cannot be parsed into a `Message`.
+    /// - `ApiError::Other` if the multipart form cannot be built.
+    pub async fn send_message(
+        &self,
+        dialog_id: u64,
+        blocks: &[CommentBlock],
+    ) -> ResultApi<Message> {
+        let path = format!("dialog/{dialog_id}/message/");
+
+        let mut form = Form::new();
+        for block in blocks {
+            form = form.part(
+                "data[]",
+                Part::text(serde_json::to_string(block).map_err(|e| {
+                    ApiError::JsonParseDetailed {
+                        error: e.to_string(),
+                    }
+                })?)
+                .mime_str("application/json")
+                .map_err(|e| ApiError::Other(e.to_string()))?,
+            );
+        }
+
+        let response = self.post_multipart(&path, form).await?;
         let response = self.handle_response(&path, response).await?;
 
         self.parse_json(response).await

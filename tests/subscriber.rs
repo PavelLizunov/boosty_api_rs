@@ -51,6 +51,10 @@ async fn test_get_subscribers_success() {
     assert_eq!(second.off_time, Some(1790000000));
     assert_eq!(second.level.parent_id, Some(2990987));
     assert!(second.level.flags.is_limited);
+
+    // Classification the provisioning bridge keys on.
+    assert!(first.is_active(), "status=active should be active");
+    assert!(!second.is_active(), "status=inactive should not be active");
 }
 
 #[tokio::test]

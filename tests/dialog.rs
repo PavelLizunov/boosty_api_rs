@@ -2,7 +2,7 @@ mod helpers;
 
 use std::fs;
 
-use boosty_api::{api_client::ApiClient, error::ApiError, traits::HasContent};
+use boosty_api::{api_client::ApiClient, error::ApiError, model::CommentBlock, traits::HasContent};
 use mockito::Matcher;
 use reqwest::{Client, header::CONTENT_TYPE};
 
@@ -107,6 +107,66 @@ async fn test_get_all_dialog_messages_stops_at_is_last() {
     let messages = client.get_all_dialog_messages(42, Some(30)).await.unwrap();
     assert_eq!(messages.len(), 2);
     extra.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_send_message_success() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    // The response echoes a single created message; reuse the messages fixture's
+    // first element shape via a minimal inline body.
+    let body = r#"{
+        "id": 99999,
+        "dialogId": 3323943,
+        "createdAt": 1783600000,
+        "authorId": 35206396,
+        "isRead": false,
+        "isPaid": false,
+        "isDeleted": false,
+        "isFeePaid": false,
+        "price": 0,
+        "previewType": "text",
+        "currencyPrices": { "RUB": 0, "USD": 0 },
+        "teaser": [],
+        "data": [ { "type": "text", "modificator": "", "content": "[\"hi\",\"unstyled\",[]]" } ],
+        "attachments": {
+            "text": { "count": 1 }, "files": { "count": 0 }, "audios": { "count": 0 },
+            "images": { "count": 0, "previewUrl": "" }, "videos": { "count": 0, "previewUrl": "" }
+        }
+    }"#;
+
+    server
+        .mock("POST", api_path("dialog/3323943/message/").as_str())
+        .match_header(
+            "content-type",
+            Matcher::Regex("multipart/form-data.*".into()),
+        )
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(body)
+        .create_async()
+        .await;
+
+    let blocks = [CommentBlock::text("hi"), CommentBlock::text_end()];
+    let msg = client.send_message(3323943, &blocks).await.unwrap();
+    assert_eq!(msg.id, 99999);
+    assert_eq!(msg.dialog_id, 3323943);
+}
+
+#[tokio::test]
+async fn test_send_message_unauthorized() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    server
+        .mock("POST", api_path("dialog/1/message/").as_str())
+        .with_status(401)
+        .create_async()
+        .await;
+
+    let res = client.send_message(1, &[CommentBlock::text("x")]).await;
+    assert!(matches!(res, Err(ApiError::Unauthorized)));
 }
 
 #[tokio::test]

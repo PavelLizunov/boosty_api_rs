@@ -98,6 +98,8 @@ Use with caution in production environments and pin specific versions if needed.
 - List dialogs via `get_dialogs(limit, offset)`.
 - Get one page of messages via `get_dialog_messages(dialog_id, limit, offset)`.
 - Get all messages in a dialog via `get_all_dialog_messages(dialog_id, limit)`.
+- Send a message into an existing dialog via `send_message(dialog_id, blocks)`
+  (reuses `CommentBlock` for the body).
 - Message content reuses `MediaData` and implements `HasContent`.
 
 ### 👥 Subscribers
