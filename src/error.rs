@@ -27,6 +27,12 @@ pub enum AuthError {
 
     #[error("Failed to parse JSON response during token refresh: {0}")]
     ParseError(#[from] serde_json::Error),
+
+    /// The callback registered to durably store the rotated refresh token
+    /// failed. Carries only the `std::io::ErrorKind` — never the token or
+    /// the raw I/O message, which may contain filesystem paths.
+    #[error("Failed to persist rotated refresh token ({0:?})")]
+    TokenPersist(std::io::ErrorKind),
 }
 
 /// Error when calling Boosty API endpoints (includes AuthError).
@@ -55,6 +61,14 @@ pub enum ApiError {
 
     #[error("Failed to serialize JSON: {0}")]
     Serialization(#[from] serde_urlencoded::ser::Error),
+
+    /// A collection endpoint could not prove that pagination completed.
+    /// Labels are static so this error never carries upstream PII or IDs.
+    #[error("Incomplete pagination for {resource}: {reason}")]
+    Pagination {
+        resource: &'static str,
+        reason: &'static str,
+    },
 
     #[error("Other error: {0}")]
     Other(String),

@@ -1,4 +1,5 @@
 use reqwest::multipart::{Form, Part};
+use std::collections::HashSet;
 
 use crate::api_client::ApiClient;
 use crate::error::{ApiError, ResultApi};
@@ -155,22 +156,44 @@ impl ApiClient {
         limit: Option<u32>,
     ) -> ResultApi<Vec<Message>> {
         let mut all_messages = Vec::new();
+        let mut seen = HashSet::new();
         let mut offset: Option<u64> = None;
 
         loop {
             let resp = self.get_dialog_messages(dialog_id, limit, offset).await?;
 
             if resp.data.is_empty() {
-                break;
+                if resp.extra.is_last {
+                    break;
+                }
+                return Err(ApiError::Pagination {
+                    resource: "dialog messages",
+                    reason: "empty nonterminal page",
+                });
             }
 
-            all_messages.extend(resp.data);
+            for message in resp.data {
+                if !seen.insert(message.id) {
+                    return Err(ApiError::Pagination {
+                        resource: "dialog messages",
+                        reason: "duplicate item",
+                    });
+                }
+                all_messages.push(message);
+            }
 
             if resp.extra.is_last {
                 break;
             }
 
-            offset = Some(resp.extra.offset);
+            let next_offset = Some(resp.extra.offset);
+            if next_offset == offset {
+                return Err(ApiError::Pagination {
+                    resource: "dialog messages",
+                    reason: "offset did not advance",
+                });
+            }
+            offset = next_offset;
         }
 
         Ok(all_messages)

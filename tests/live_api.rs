@@ -23,7 +23,7 @@ fn client() -> ApiClient {
 }
 
 /// Credentials for the authenticated live tests, read from the gitignored
-/// `.secrets/boosty.json` (see CLAUDE.md § 8 for how to obtain them).
+/// `.secrets/boosty.json` (see AGENTS.md for the authorization rules).
 /// Values are NEVER printed.
 #[derive(Deserialize)]
 struct Secrets {

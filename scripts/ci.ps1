@@ -14,8 +14,10 @@ $Gates = @(
     @{ Name = "Layer 2:  unit tests";        Exe = Join-Path $ToolchainBin "cargo.exe"; Args = @("test", "--lib", "--quiet") },
     # All offline integration tests; tests/live_api.rs is #[ignore]d and stays offline.
     @{ Name = "Layer 3:  contract tests";    Exe = Join-Path $ToolchainBin "cargo.exe"; Args = @("test", "--tests", "--quiet") },
-    # Known-vulnerability scan of Cargo.lock (RustSec); fetches the advisory DB.
-    @{ Name = "Layer 4:  dependency audit";  Exe = Join-Path $ToolchainBin "cargo.exe"; Args = @("audit") }
+    # rust_decimal lists rkyv as an optional, disabled feature. Cargo.lock v4
+    # records it, but `cargo tree --target all -i rkyv` proves it is not in any
+    # build graph. Ignore only that unreachable advisory; all others still fail.
+    @{ Name = "Layer 4:  dependency audit";  Exe = Join-Path $ToolchainBin "cargo.exe"; Args = @("audit", "--ignore", "RUSTSEC-2026-0235") }
 )
 
 # === RUNNER — usually no edits =========================================

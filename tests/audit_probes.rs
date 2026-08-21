@@ -4,11 +4,15 @@
 
 mod helpers;
 
-use boosty_api::{api_client::ApiClient, error::ApiError};
+use boosty_api::{
+    api_client::ApiClient,
+    error::{ApiError, AuthError},
+};
 use mockito::Matcher;
 use reqwest::{Client, header::CONTENT_TYPE};
 use serde_json::{Value, json};
 use std::fs;
+use std::io;
 
 use crate::helpers::{api_path, setup};
 
@@ -99,6 +103,79 @@ async fn probe_retries_once_on_401_with_refresh_flow() {
 
     let _ = client.get_post("b", "1").await;
     get_mock.assert_async().await;
+}
+
+/// PROBE 3b: mutations never refresh and retry inside the SDK after a 401.
+#[tokio::test]
+async fn probe_mutation_does_not_retry_on_401() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    client
+        .set_refresh_token_and_device_id("r1", "d1")
+        .await
+        .unwrap();
+
+    let refresh = server
+        .mock("POST", "/oauth/token/")
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(r#"{"access_token":"tokA","refresh_token":"r2","expires_in":3600}"#)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let mutation = server
+        .mock("PUT", api_path("blog/b/showcase/status/").as_str())
+        .with_status(401)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let result = client.change_showcase_status("b", true).await;
+    assert!(matches!(result, Err(ApiError::Unauthorized)));
+    refresh.assert_async().await;
+    mutation.assert_async().await;
+}
+
+/// PROBE 3c: failed durable rotation prevents the original read request.
+#[tokio::test]
+async fn probe_rotation_persistence_failure_is_fail_closed() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    client
+        .set_refresh_token_and_device_id_with_persister("r1", "d1", |_, _| {
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, "redacted"))
+        })
+        .await
+        .unwrap();
+
+    let refresh = server
+        .mock("POST", "/oauth/token/")
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(r#"{"access_token":"tokA","refresh_token":"r2","expires_in":3600}"#)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let endpoint = server
+        .mock("GET", api_path("blog/b/post/1").as_str())
+        .with_status(200)
+        .expect(0)
+        .create_async()
+        .await;
+
+    let result = client.get_post("b", "1").await;
+    assert!(matches!(
+        result,
+        Err(ApiError::Auth(AuthError::TokenPersist(
+            io::ErrorKind::PermissionDenied
+        )))
+    ));
+    refresh.assert_async().await;
+    endpoint.assert_async().await;
 }
 
 /// PROBE 4: get_all_comments must stop at the terminal page without an

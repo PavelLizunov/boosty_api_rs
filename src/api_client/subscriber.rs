@@ -1,6 +1,7 @@
 use crate::api_client::{ApiClient, encode_segment};
-use crate::error::ResultApi;
+use crate::error::{ApiError, ResultApi};
 use crate::model::{Subscriber, SubscribersResponse};
+use std::collections::HashSet;
 
 /// Per-request page size used by [`ApiClient::get_all_subscribers`].
 const SUBSCRIBERS_PAGE_SIZE: u32 = 100;
@@ -75,6 +76,8 @@ impl ApiClient {
         order: Option<&str>,
     ) -> ResultApi<Vec<Subscriber>> {
         let mut all = Vec::new();
+        let mut seen = HashSet::new();
+        let mut expected_total = None;
 
         loop {
             let resp = self
@@ -87,14 +90,44 @@ impl ApiClient {
                 )
                 .await?;
 
-            let got = resp.data.len();
-            all.extend(resp.data);
+            let total = *expected_total.get_or_insert(resp.total);
+            if resp.total != total {
+                return Err(ApiError::Pagination {
+                    resource: "subscribers",
+                    reason: "total changed between pages",
+                });
+            }
 
-            if got == 0 || all.len() as u64 >= resp.total {
-                break;
+            if resp.data.is_empty() {
+                if all.len() as u64 == total {
+                    return Ok(all);
+                }
+                return Err(ApiError::Pagination {
+                    resource: "subscribers",
+                    reason: "empty page before expected total",
+                });
+            }
+
+            for subscriber in resp.data {
+                if !seen.insert(subscriber.id) {
+                    return Err(ApiError::Pagination {
+                        resource: "subscribers",
+                        reason: "duplicate item",
+                    });
+                }
+                all.push(subscriber);
+            }
+
+            match (all.len() as u64).cmp(&total) {
+                std::cmp::Ordering::Equal => return Ok(all),
+                std::cmp::Ordering::Greater => {
+                    return Err(ApiError::Pagination {
+                        resource: "subscribers",
+                        reason: "page exceeded expected total",
+                    });
+                }
+                std::cmp::Ordering::Less => {}
             }
         }
-
-        Ok(all)
     }
 }

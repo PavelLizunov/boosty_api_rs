@@ -2,10 +2,42 @@ use std::fs;
 
 use boosty_api::{api_client::ApiClient, error::ApiError, model::CommentBlock};
 use reqwest::{Client, header::CONTENT_TYPE};
+use serde_json::{Value, json};
 
 use crate::helpers::{api_path, setup};
 
 mod helpers;
+
+fn comments_page(ids: &[u64], is_first: bool, is_last: bool) -> String {
+    let raw = fs::read_to_string("tests/fixtures/api_response_comments_list_page1.json").unwrap();
+    let mut response: Value = serde_json::from_str(&raw).unwrap();
+    let template = response["data"][0].clone();
+    response["data"] = Value::Array(
+        ids.iter()
+            .map(|id| {
+                let mut comment = template.clone();
+                comment["id"] = Value::String(format!("comment-{id}"));
+                comment["intId"] = json!(id);
+                comment
+            })
+            .collect(),
+    );
+    response["extra"] = json!({"isFirst": is_first, "isLast": is_last});
+    response.to_string()
+}
+
+fn assert_pagination(
+    result: Result<Vec<boosty_api::model::Comment>, ApiError>,
+    reason: &'static str,
+) {
+    assert!(matches!(
+        result,
+        Err(ApiError::Pagination {
+            resource: "comments",
+            reason: actual
+        }) if actual == reason
+    ));
+}
 
 #[tokio::test]
 async fn test_create_comment_unauthorized() {
@@ -183,4 +215,81 @@ async fn test_get_comments_response_success() {
     assert_eq!(comments_response.data[1].int_id, 1001);
     assert!(comments_response.extra.is_first, "Expected is_first = true");
     assert!(!comments_response.extra.is_last, "Expected is_last = false");
+}
+
+#[tokio::test]
+async fn test_get_all_comments_rejects_empty_nonterminal_page() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    server
+        .mock("GET", api_path("blog/b/post/p/comment/").as_str())
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(comments_page(&[], false, false))
+        .create_async()
+        .await;
+
+    assert_pagination(
+        client.get_all_comments("b", "p", None, None, None).await,
+        "empty nonterminal page",
+    );
+}
+
+#[tokio::test]
+async fn test_get_all_comments_rejects_duplicate_item() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    server
+        .mock("GET", api_path("blog/b/post/p/comment/").as_str())
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(comments_page(&[1000], false, false))
+        .create_async()
+        .await;
+    server
+        .mock(
+            "GET",
+            api_path("blog/b/post/p/comment/?offset=1000").as_str(),
+        )
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(comments_page(&[1000, 1001], true, true))
+        .create_async()
+        .await;
+
+    assert_pagination(
+        client.get_all_comments("b", "p", None, None, None).await,
+        "duplicate item",
+    );
+}
+
+#[tokio::test]
+async fn test_get_all_comments_rejects_stalled_offset() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    server
+        .mock("GET", api_path("blog/b/post/p/comment/").as_str())
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(comments_page(&[1000], false, false))
+        .create_async()
+        .await;
+    server
+        .mock(
+            "GET",
+            api_path("blog/b/post/p/comment/?offset=1000").as_str(),
+        )
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(comments_page(&[1000], false, false))
+        .create_async()
+        .await;
+
+    assert_pagination(
+        client.get_all_comments("b", "p", None, None, None).await,
+        "offset did not advance",
+    );
 }

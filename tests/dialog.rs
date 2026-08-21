@@ -5,8 +5,39 @@ use std::fs;
 use boosty_api::{api_client::ApiClient, error::ApiError, model::CommentBlock, traits::HasContent};
 use mockito::Matcher;
 use reqwest::{Client, header::CONTENT_TYPE};
+use serde_json::{Value, json};
 
 use crate::helpers::{api_path, setup};
+
+fn messages_page(ids: &[u64], is_last: bool, offset: u64) -> String {
+    let raw = fs::read_to_string("tests/fixtures/api_response_messages.json").unwrap();
+    let mut response: Value = serde_json::from_str(&raw).unwrap();
+    let template = response["data"][0].clone();
+    response["data"] = Value::Array(
+        ids.iter()
+            .map(|id| {
+                let mut message = template.clone();
+                message["id"] = json!(id);
+                message
+            })
+            .collect(),
+    );
+    response["extra"] = json!({"isLast": is_last, "offset": offset});
+    response.to_string()
+}
+
+fn assert_pagination(
+    result: Result<Vec<boosty_api::model::Message>, ApiError>,
+    reason: &'static str,
+) {
+    assert!(matches!(
+        result,
+        Err(ApiError::Pagination {
+            resource: "dialog messages",
+            reason: actual
+        }) if actual == reason
+    ));
+}
 
 #[tokio::test]
 async fn test_get_dialogs_success() {
@@ -107,6 +138,94 @@ async fn test_get_all_dialog_messages_stops_at_is_last() {
     let messages = client.get_all_dialog_messages(42, Some(30)).await.unwrap();
     assert_eq!(messages.len(), 2);
     extra.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_get_all_dialog_messages_rejects_stalled_offset() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    let raw = fs::read_to_string("tests/fixtures/api_response_messages.json")
+        .unwrap()
+        .replace(r#""isLast": true"#, r#""isLast": false"#);
+    let second_page = raw
+        .replace(r#""id": 22309754"#, r#""id": 22309755"#)
+        .replace(r#""id": 43887558"#, r#""id": 43887559"#);
+
+    server
+        .mock("GET", api_path("dialog/42/message/?limit=30").as_str())
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(raw.clone())
+        .create_async()
+        .await;
+    server
+        .mock(
+            "GET",
+            api_path("dialog/42/message/?offset=43887558&limit=30").as_str(),
+        )
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(second_page)
+        .create_async()
+        .await;
+
+    let result = client.get_all_dialog_messages(42, Some(30)).await;
+    assert!(matches!(
+        result,
+        Err(ApiError::Pagination {
+            resource: "dialog messages",
+            reason: "offset did not advance"
+        })
+    ));
+}
+
+#[tokio::test]
+async fn test_get_all_dialog_messages_rejects_empty_nonterminal_page() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    server
+        .mock("GET", api_path("dialog/42/message/?limit=30").as_str())
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(messages_page(&[], false, 10))
+        .create_async()
+        .await;
+
+    assert_pagination(
+        client.get_all_dialog_messages(42, Some(30)).await,
+        "empty nonterminal page",
+    );
+}
+
+#[tokio::test]
+async fn test_get_all_dialog_messages_rejects_duplicate_item() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    server
+        .mock("GET", api_path("dialog/42/message/?limit=30").as_str())
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(messages_page(&[1], false, 10))
+        .create_async()
+        .await;
+    server
+        .mock(
+            "GET",
+            api_path("dialog/42/message/?offset=10&limit=30").as_str(),
+        )
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(messages_page(&[1], true, 20))
+        .create_async()
+        .await;
+
+    assert_pagination(
+        client.get_all_dialog_messages(42, Some(30)).await,
+        "duplicate item",
+    );
 }
 
 #[tokio::test]

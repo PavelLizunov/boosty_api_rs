@@ -1,6 +1,7 @@
 use crate::api_client::{ApiClient, DEFAULT_PAGE_SIZE, encode_segment};
-use crate::error::ResultApi;
+use crate::error::{ApiError, ResultApi};
 use crate::model::{Post, PostsResponse};
+use std::collections::HashSet;
 
 impl ApiClient {
     /// Get a single post once, without automatic retry on "not available" or HTTP 401.
@@ -66,6 +67,7 @@ impl ApiClient {
         let page_size = page_size.unwrap_or(DEFAULT_PAGE_SIZE);
 
         let mut all_posts = Vec::new();
+        let mut seen = HashSet::new();
         let mut offset = start_offset;
 
         loop {
@@ -86,13 +88,35 @@ impl ApiClient {
             let posts_response: PostsResponse = self.parse_json(response).await?;
 
             let data_len = posts_response.data.len();
-            all_posts.extend(posts_response.data);
+            for post in posts_response.data {
+                if !seen.insert(post.id.clone()) {
+                    return Err(ApiError::Pagination {
+                        resource: "posts",
+                        reason: "duplicate item",
+                    });
+                }
+                all_posts.push(post);
+            }
 
-            if posts_response.extra.is_last || all_posts.len() >= limit || data_len == 0 {
+            if posts_response.extra.is_last || all_posts.len() >= limit {
                 break;
             }
 
-            offset = Some(posts_response.extra.offset);
+            if data_len == 0 {
+                return Err(ApiError::Pagination {
+                    resource: "posts",
+                    reason: "empty nonterminal page",
+                });
+            }
+
+            let next_offset = Some(posts_response.extra.offset);
+            if next_offset == offset {
+                return Err(ApiError::Pagination {
+                    resource: "posts",
+                    reason: "offset did not advance",
+                });
+            }
+            offset = next_offset;
         }
 
         // The server may over-deliver; never return more than asked for.

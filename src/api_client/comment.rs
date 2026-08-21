@@ -1,4 +1,5 @@
 use reqwest::multipart::{Form, Part};
+use std::collections::HashSet;
 
 use crate::{
     api_client::{ApiClient, encode_segment},
@@ -97,6 +98,7 @@ impl ApiClient {
         order: Option<&str>,
     ) -> ResultApi<Vec<Comment>> {
         let mut all_comments = Vec::new();
+        let mut seen = HashSet::new();
         let mut offset: Option<u64> = None;
 
         loop {
@@ -105,12 +107,34 @@ impl ApiClient {
                 .await?;
 
             if resp.data.is_empty() {
-                break;
+                if resp.extra.is_last && resp.extra.is_first {
+                    break;
+                }
+                return Err(ApiError::Pagination {
+                    resource: "comments",
+                    reason: "empty nonterminal page",
+                });
             }
 
             let last_id = resp.data.last().map(|c| c.int_id);
+            let terminal = resp.extra.is_last && resp.extra.is_first;
 
-            all_comments.extend(resp.data);
+            if !terminal && last_id == offset {
+                return Err(ApiError::Pagination {
+                    resource: "comments",
+                    reason: "offset did not advance",
+                });
+            }
+
+            for comment in resp.data {
+                if !seen.insert(comment.int_id) {
+                    return Err(ApiError::Pagination {
+                        resource: "comments",
+                        reason: "duplicate item",
+                    });
+                }
+                all_comments.push(comment);
+            }
 
             // Live-API semantics (verified against api.boosty.to, 2026-07): the
             // extra flags are chronological, not directional. With the default
@@ -119,7 +143,7 @@ impl ApiClient {
             // (isLast always true, isFirst flips on the final page). So in
             // either order the terminal page is exactly `is_first && is_last`;
             // the empty-page check above stays as a safety net.
-            if resp.extra.is_last && resp.extra.is_first {
+            if terminal {
                 break;
             }
 

@@ -10,6 +10,12 @@ use tokio::sync::Mutex;
 /// Enough to see the OAuth error code, short enough to not leak echoed params.
 const REFRESH_ERROR_BODY_MAX_CHARS: usize = 200;
 
+/// Synchronous, dependency-free callback that durably stores a rotated
+/// `(refresh_token, device_id)` pair. Invoked under the state lock on every
+/// successful refresh, before the new credentials become visible; an error
+/// aborts the refresh with a redacted [`AuthError`].
+type TokenPersister = dyn Fn(&str, &str) -> std::io::Result<()> + Send + Sync;
+
 /// Response body for token refresh endpoint.
 #[derive(Deserialize)]
 struct RefreshResponse {
@@ -33,6 +39,8 @@ struct AuthState {
     access_token: Option<String>,
     /// Expiration instant for `access_token`.
     expires_at: Option<Instant>,
+    /// Optional durable sink for rotated `(refresh_token, device_id)` pairs.
+    persister: Option<Arc<TokenPersister>>,
 }
 
 /// Manual Debug: never print credential values, only whether they are set.
@@ -70,6 +78,7 @@ impl AuthProvider {
             refresh_token: None,
             access_token: None,
             expires_at: None,
+            persister: None,
         };
         Self {
             client,
@@ -119,6 +128,7 @@ impl AuthProvider {
         st.refresh_token = None;
         st.access_token = None;
         st.expires_at = None;
+        st.persister = None;
         Ok(())
     }
 
@@ -142,6 +152,37 @@ impl AuthProvider {
         st.device_id = Some(device_id);
         st.access_token = None;
         st.expires_at = None;
+        st.persister = None;
+        Ok(())
+    }
+
+    /// Configure refresh credentials together with a durable rotation sink.
+    ///
+    /// The sink runs synchronously under the authentication lock after Boosty
+    /// rotates the token and before the refreshed access token can authorize
+    /// the original request. Long-running clients should use this method.
+    pub async fn set_refresh_token_and_device_id_with_persister<F>(
+        &self,
+        refresh: String,
+        device_id: String,
+        persister: F,
+    ) -> ResultAuth<()>
+    where
+        F: Fn(&str, &str) -> std::io::Result<()> + Send + Sync + 'static,
+    {
+        if refresh.is_empty() {
+            return Err(AuthError::EmptyRefreshToken);
+        }
+        if device_id.is_empty() {
+            return Err(AuthError::EmptyDeviceId);
+        }
+        let mut st = self.state.lock().await;
+        st.static_access_token = None;
+        st.refresh_token = Some(refresh);
+        st.device_id = Some(device_id);
+        st.access_token = None;
+        st.expires_at = None;
+        st.persister = Some(Arc::new(persister));
         Ok(())
     }
 
@@ -237,6 +278,17 @@ impl AuthProvider {
         let data: RefreshResponse = resp.json().await.map_err(AuthError::HttpRequest)?;
         let now = Instant::now();
 
+        if let Some(persister) = &st.persister
+            && let Err(error) = persister(&data.refresh_token, &device_id)
+        {
+            // Boosty has already rotated the lineage. Keep the new token only
+            // in memory for recovery, but never authorize the original request.
+            st.refresh_token = Some(data.refresh_token);
+            st.access_token = None;
+            st.expires_at = None;
+            return Err(AuthError::TokenPersist(error.kind()));
+        }
+
         st.access_token = Some(data.access_token);
         st.refresh_token = Some(data.refresh_token);
         st.expires_at = Some(now + Duration::from_secs(data.expires_in.max(0) as u64));
@@ -262,6 +314,7 @@ impl AuthProvider {
         st.device_id = None;
         st.access_token = None;
         st.expires_at = None;
+        st.persister = None;
     }
 }
 

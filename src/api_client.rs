@@ -16,6 +16,12 @@ use reqwest::{Client, RequestBuilder, Response, StatusCode, multipart};
 /// Default number of posts to fetch per page.
 const DEFAULT_PAGE_SIZE: usize = 20;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RequestPolicy {
+    Read,
+    Mutation,
+}
+
 /// Percent-encode a value for interpolation into a URL path segment or query
 /// value (RFC 3986: unreserved characters pass through, everything else is
 /// `%XX`-encoded byte-wise). Values like blog urls can come from API
@@ -163,6 +169,28 @@ impl ApiClient {
             .await
     }
 
+    /// Configure refresh credentials with durable rotation persistence.
+    ///
+    /// The persister runs under the authentication lock before a refreshed
+    /// access token can authorize the original request.
+    pub async fn set_refresh_token_and_device_id_with_persister<F>(
+        &self,
+        refresh_token: &str,
+        device_id: &str,
+        persister: F,
+    ) -> ResultAuth<()>
+    where
+        F: Fn(&str, &str) -> std::io::Result<()> + Send + Sync + 'static,
+    {
+        self.auth_provider
+            .set_refresh_token_and_device_id_with_persister(
+                refresh_token.to_string(),
+                device_id.to_string(),
+                persister,
+            )
+            .await
+    }
+
     /// Clear refresh token and device ID (disables refresh flow).
     pub async fn clear_refresh_and_device_id(&self) {
         self.auth_provider.clear_refresh_and_device_id().await
@@ -193,22 +221,26 @@ impl ApiClient {
 
     /// Current refresh token, if the refresh flow is configured.
     ///
-    /// Boosty rotates the refresh token on every successful refresh; persist
-    /// this value if you need to authenticate again after a restart.
+    /// This is a compatibility/diagnostic accessor. Long-running processes
+    /// must use `set_refresh_token_and_device_id_with_persister`; saving this
+    /// value after a request leaves a crash window.
     pub async fn refresh_token(&self) -> Option<String> {
         self.auth_provider.refresh_token().await
     }
 
-    /// Internal: attach default + auth headers, send, and retry once on 401
-    /// via a forced token refresh when the refresh flow is configured.
-    ///
-    /// Requests with streaming bodies (multipart) cannot be cloned and are
-    /// sent without the retry.
-    async fn send_authorized(&self, builder: RequestBuilder) -> ResultApi<Response> {
+    /// Internal: attach default + auth headers and send. Read requests may
+    /// force one refresh and retry after 401; mutations never retry here.
+    async fn send_authorized(
+        &self,
+        builder: RequestBuilder,
+        policy: RequestPolicy,
+    ) -> ResultApi<Response> {
         let mut headers = self.headers.clone();
         self.auth_provider.apply_auth_header(&mut headers).await?;
         let builder = builder.headers(headers);
-        let retry_builder = builder.try_clone();
+        let retry_builder = (policy == RequestPolicy::Read)
+            .then(|| builder.try_clone())
+            .flatten();
 
         let response = builder.send().await.map_err(ApiError::HttpRequest)?;
 
@@ -244,7 +276,8 @@ impl ApiClient {
     ///
     /// On success, returns `reqwest::Response`. On network error, returns `ApiError::HttpRequest`.
     async fn get_request(&self, path: &str) -> ResultApi<Response> {
-        self.send_authorized(self.client.get(self.url(path))).await
+        self.send_authorized(self.client.get(self.url(path)), RequestPolicy::Read)
+            .await
     }
 
     /// Internal: perform a POST request with optional form or JSON body.
@@ -273,7 +306,7 @@ impl ApiClient {
         } else {
             builder.json(body)
         };
-        self.send_authorized(builder).await
+        self.send_authorized(builder, RequestPolicy::Mutation).await
     }
 
     /// Internal: perform a POST request with multipart form.
@@ -291,8 +324,11 @@ impl ApiClient {
     /// On success, returns a `reqwest::Response`.
     /// On network failure, returns [`ApiError::HttpRequest`].
     async fn post_multipart(&self, path: &str, form: multipart::Form) -> ResultApi<Response> {
-        self.send_authorized(self.client.post(self.url(path)).multipart(form))
-            .await
+        self.send_authorized(
+            self.client.post(self.url(path)).multipart(form),
+            RequestPolicy::Mutation,
+        )
+        .await
     }
 
     /// Internal: perform a DELETE request to the given API path.
@@ -308,7 +344,7 @@ impl ApiClient {
     /// On success, returns a `reqwest::Response`.
     /// On network failure, returns [`ApiError::HttpRequest`].
     async fn delete_request(&self, path: &str) -> ResultApi<Response> {
-        self.send_authorized(self.client.delete(self.url(path)))
+        self.send_authorized(self.client.delete(self.url(path)), RequestPolicy::Mutation)
             .await
     }
 
@@ -338,7 +374,7 @@ impl ApiClient {
         } else {
             builder.json(body)
         };
-        self.send_authorized(builder).await
+        self.send_authorized(builder, RequestPolicy::Mutation).await
     }
 }
 

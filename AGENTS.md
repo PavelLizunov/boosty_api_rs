@@ -1,9 +1,8 @@
 # AGENTS.md
 
 Agent onboarding for `boosty_api` (Rust). Read this first, then read
-`docs/IMPLEMENTATION.md` for the full, self-contained design + bridge spec.
-`CLAUDE.md` is the Claude-Code variant of the same rules — you don't need it,
-but it is the source of truth if the two ever disagree.
+`docs/IMPLEMENTATION.md` for the self-contained client contract. This file is
+the single agent-contract source.
 
 ## What this repo is
 
@@ -22,12 +21,8 @@ API — every claimed behavior is backed by a test.
 - Security hardening (dependency-audit gate, refresh-error redaction, URL
   path/query percent-encoding): **done**.
 - `docs/IMPLEMENTATION.md`: complete handoff spec written for the next phase.
-- **Next phase (Phase 2): the Boosty↔vpnctl bridge**, built in the SEPARATE
-  `vpnctl` repo, consuming this crate. This crate is feature-complete for it.
-- In THIS repo there is no pending code task unless the live API drifts (see
-  "Model / API changes"). To build the bridge, switch to the `vpnctl` repo and
-  follow `docs/IMPLEMENTATION.md` Part II — and get the § 12 open questions
-  answered by the user before its Phase C.
+- This crate contains no product policy. Product-specific orchestration belongs
+  in its consuming repository.
 
 ## Build & test (Windows 11 host, PowerShell)
 
@@ -57,21 +52,20 @@ cargo test --test live_api -- --ignored --nocapture
 
 ## Commit gate — READ THIS
 
-The blocking pre-commit gate is a **Claude Code hook**
-(`.claude/hooks/git-gate.ps1`, wired via `.claude/settings.json`). It **does
-NOT run under Codex.** Enforcement is therefore on you:
-
-- **Run `scripts/ci.ps1` and confirm it is green before every commit.** Same
-  bar as the hook: fmt clean, clippy `-D warnings`, unit + contract tests
-  pass, `cargo audit` clean.
+- **Run `scripts/ci.ps1` and confirm it is green before every commit:** fmt
+  clean, clippy `-D warnings`, unit + contract tests pass, `cargo audit` clean.
 - Model/API-contract changes additionally require the live canary (below).
 - There is nothing to `--no-verify` around — just never commit red.
 - **No pushes or releases without the user's explicit go.**
 
 ## Hard invariants (each one caused a real bug or a security issue)
 
-- All HTTP goes through `ApiClient::send_authorized` (auth header + single
-  retry-on-401). Never call `self.client.get(...)` from endpoint modules.
+- All HTTP goes through `ApiClient::send_authorized`. Only reads may retry once
+  after 401; mutations never retry inside the SDK. Never call
+  `self.client.get(...)` from endpoint modules.
+- Long-running callers use
+  `set_refresh_token_and_device_id_with_persister`; post-request persistence is
+  not crash-safe.
 - Every response passes `handle_response` (status check) before `parse_json`.
   No exceptions — DELETE included.
 - Every string interpolated into a URL path or query goes through

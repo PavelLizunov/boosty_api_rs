@@ -9,6 +9,33 @@ use crate::helpers::{api_path, setup};
 
 mod helpers;
 
+fn posts_page(ids: &[&str], is_last: bool, offset: &str) -> String {
+    let raw = fs::read_to_string("tests/fixtures/api_response_posts.json").unwrap();
+    let mut response: Value = serde_json::from_str(&raw).unwrap();
+    let template = response["data"][0].clone();
+    response["data"] = Value::Array(
+        ids.iter()
+            .map(|id| {
+                let mut post = template.clone();
+                post["id"] = Value::String((*id).to_string());
+                post
+            })
+            .collect(),
+    );
+    response["extra"] = json!({"isLast": is_last, "offset": offset});
+    response.to_string()
+}
+
+fn assert_pagination(result: Result<Vec<boosty_api::model::Post>, ApiError>, reason: &'static str) {
+    assert!(matches!(
+        result,
+        Err(ApiError::Pagination {
+            resource: "posts",
+            reason: actual
+        }) if actual == reason
+    ));
+}
+
 #[tokio::test]
 async fn test_get_post_unauthorized() {
     let (mut server, base) = setup().await;
@@ -318,4 +345,75 @@ async fn test_set_refresh_and_get_post_header_and_flow() {
 
     let result = client.get_post(blog, post_id).await.unwrap();
     assert_eq!(result.id, "55");
+}
+
+#[tokio::test]
+async fn test_get_posts_rejects_empty_nonterminal_page() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    server
+        .mock("GET", api_path("blog/b/post/?limit=1").as_str())
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(posts_page(&[], false, "same"))
+        .create_async()
+        .await;
+
+    assert_pagination(
+        client.get_posts("b", 3, Some(1), None).await,
+        "empty nonterminal page",
+    );
+}
+
+#[tokio::test]
+async fn test_get_posts_rejects_duplicate_item() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    server
+        .mock("GET", api_path("blog/b/post/?limit=1").as_str())
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(posts_page(&["p1"], false, "next"))
+        .create_async()
+        .await;
+    server
+        .mock("GET", api_path("blog/b/post/?limit=1&offset=next").as_str())
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(posts_page(&["p1"], true, "done"))
+        .create_async()
+        .await;
+
+    assert_pagination(
+        client.get_posts("b", 3, Some(1), None).await,
+        "duplicate item",
+    );
+}
+
+#[tokio::test]
+async fn test_get_posts_rejects_stalled_offset() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    server
+        .mock("GET", api_path("blog/b/post/?limit=1").as_str())
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(posts_page(&["p1"], false, "same"))
+        .create_async()
+        .await;
+    server
+        .mock("GET", api_path("blog/b/post/?limit=1&offset=same").as_str())
+        .with_status(200)
+        .with_header(CONTENT_TYPE, "application/json")
+        .with_body(posts_page(&["p2"], false, "same"))
+        .create_async()
+        .await;
+
+    assert_pagination(
+        client.get_posts("b", 3, Some(1), None).await,
+        "offset did not advance",
+    );
 }

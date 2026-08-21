@@ -44,15 +44,15 @@ Use with caution in production environments and pin specific versions if needed.
 ### 🔐 Authentication
 
 - Static bearer token or refresh-token + device ID (OAuth2-like).
-- Automatic token refresh and retry on expiration.
+- Automatic token refresh with durable rotation support.
 - Clean separation of `AuthProvider` logic.
 
 ### 🔁 Retry Behavior
 
 - All requests go through a single authorized-send path.
 - Before each request the access token is refreshed proactively when it is about to expire.
-- If the server still answers `401 Unauthorized` and the refresh flow (refresh token + device ID) is configured, the client forces a token refresh and retries the request once.
-- Multipart requests (e.g. `create_comment`) stream their body and are not retried.
+- If a GET still answers `401 Unauthorized` and refresh credentials are configured, the client forces one refresh and retries that read once.
+- POST, PUT, DELETE, and multipart requests are never retried by the SDK because the remote mutation may already have happened.
 - Other error statuses (4xx/5xx) are not retried.
 
 ### 📝 Post API
@@ -292,15 +292,22 @@ api_client.set_bearer_token("access-token").await?;
 api_client.set_refresh_token_and_device_id("refresh-token", "device-id").await?;
 ```
 
-With refresh credentials present, the client refreshes the access token before requests as needed and retries once on `401 Unauthorized`.
+This compatibility method is suitable only when crash-safe rotation is not required. Long-running services must register a durable callback instead:
 
-The Boosty API rotates the refresh token on every successful refresh. Read the current value via `api_client.refresh_token().await` and persist it if you need to authenticate again after a restart:
-
-```rust
-if let Some(current_refresh_token) = api_client.refresh_token().await {
-    // save it alongside your device-id for the next run
-}
+```rust,ignore
+api_client
+    .set_refresh_token_and_device_id_with_persister(
+        "refresh-token",
+        "device-id",
+        |rotated_refresh_token, device_id| {
+            // Durably and atomically replace the stored credential pair here.
+            persist_credentials(rotated_refresh_token, device_id)
+        },
+    )
+    .await?;
 ```
+
+The callback completes before a rotated credential can authorize the original request. If it fails, the request fails closed. Saving `refresh_token()` only after a request leaves a crash window and is not safe for a persistent service.
 
 ## Crate Structure
 
