@@ -241,7 +241,7 @@ mod tests {
             publish_time: 0,
             title: Some(String::new()),
             sort_order: 0,
-            price: 0,
+            price: 0.0,
             id: "".into(),
             comments: Comments {
                 extra: ExtraFlag { is_last: false },
@@ -255,7 +255,11 @@ mod tests {
             updated_at: 0,
             signed_query: "".into(),
             advertiser_info: None,
-            currency_prices: CurrencyPrices { eur: 0.0, rub: 0.0, usd: 0.0 },
+            currency_prices: CurrencyPrices {
+                eur: 0.0,
+                rub: 0.0,
+                usd: 0.0,
+            },
             is_showcase_visible: false,
             reactions_disabled: false,
         }
@@ -282,12 +286,12 @@ mod tests {
         let post = dummy_post(vec![MediaData::Smile(smiley)], true);
         let content = post.extract_content();
 
-        assert!(
-            matches!(content[0], ContentItem::Smile { ref small_url, ref medium_url, 
-                ref large_url, ref name, is_animated } 
-                if small_url == "smile_url" && medium_url == "smile_url"
-                && large_url == "smile_url" && name == "smile" && !is_animated)
-        );
+        assert!(matches!(
+            content[0],
+            ContentItem::Smile { ref small_url, ref medium_url, ref large_url, ref name, is_animated }
+            if small_url == "smile_url" && medium_url == "smile_url"
+                && large_url == "smile_url" && name == "smile" && !is_animated
+        ));
     }
 
     #[test]

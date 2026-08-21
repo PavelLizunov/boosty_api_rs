@@ -1,5 +1,5 @@
-use crate::api_client::ApiClient;
-use crate::error::{ApiError, ResultApi};
+use crate::api_client::{ApiClient, encode_segment};
+use crate::error::ResultApi;
 use crate::model::{NewTarget, Target, TargetResponse, TargetType, UpdateTarget};
 
 impl ApiClient {
@@ -16,10 +16,9 @@ impl ApiClient {
     /// # Errors
     ///
     /// - `ApiError::HttpRequest` if the network request fails.
-    /// - `ApiError::JsonParse` if the HTTP response body cannot be parsed as JSON.
-    /// - `ApiError::Deserialization` if the body cannot be deserialized into `TargetResponse`.
+    /// - `ApiError::JsonParseDetailed` if the body cannot be parsed into a `TargetResponse`.
     pub async fn get_blog_targets(&self, blog_name: &str) -> ResultApi<TargetResponse> {
-        let path = format!("target/{blog_name}/");
+        let path = format!("target/{}/", encode_segment(blog_name));
 
         let response = self.get_request(&path).await?;
         let response = self.handle_response(&path, response).await?;
@@ -42,9 +41,8 @@ impl ApiClient {
     ///
     /// # Errors
     ///
-    /// - [`ApiError::HttpRequest`] — if the network request fails.
-    /// - [`ApiError::JsonParse`] — if the response body cannot be parsed as valid JSON.
-    /// - [`ApiError::Deserialization`] — if the JSON does not match the [`Target`] structure.
+    /// - `ApiError::HttpRequest` — if the network request fails.
+    /// - `ApiError::JsonParseDetailed` — if the JSON does not match the [`Target`] structure.
     pub async fn create_blog_target(
         &self,
         blog_name: &str,
@@ -77,21 +75,19 @@ impl ApiClient {
     ///
     /// # Returns
     ///
-    /// `()` on success. The API returns 200 OK with an empty JSON body.
+    /// `()` on success. The API returns 200 OK with an empty JSON body,
+    /// which is ignored.
     ///
     /// # Errors
     ///
-    /// - [`ApiError::HttpRequest`] — if the network request fails.
-    /// - [`ApiError::JsonParse`] — if the response body cannot be parsed as JSON (rare for DELETE).
+    /// - `ApiError::Unauthorized` — if the HTTP status is 401 Unauthorized.
+    /// - `ApiError::HttpStatus` — for other non-success HTTP statuses.
+    /// - `ApiError::HttpRequest` — if the network request fails.
     pub async fn delete_blog_target(&self, target_id: u64) -> ResultApi<()> {
         let path = format!("target/{}", target_id);
 
         let response = self.delete_request(&path).await?;
-
-        let _ = response
-            .json::<serde_json::Value>()
-            .await
-            .map_err(ApiError::JsonParse)?;
+        self.handle_response(&path, response).await?;
 
         Ok(())
     }
@@ -110,8 +106,8 @@ impl ApiClient {
     ///
     /// # Errors
     ///
-    /// - [`ApiError::HttpRequest`] — if the network request fails.
-    /// - [`ApiError::JsonParse`] — if JSON parsing fails.
+    /// - `ApiError::HttpRequest` — if the network request fails.
+    /// - `ApiError::JsonParseDetailed` — if JSON parsing fails.
     pub async fn update_blog_target(
         &self,
         target_id: u64,

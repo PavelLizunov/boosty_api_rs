@@ -48,8 +48,8 @@ pub struct Bundle {
     pub title: String,
     /// Bundle description.
     pub description: String,
-    /// Price in the default currency.
-    pub price: i32,
+    /// Price in the default currency. Fractional values occur on the live API.
+    pub price: f64,
     /// Price in different currencies.
     pub currency_prices: CurrencyPrices,
     /// Whether the bundle is hidden.

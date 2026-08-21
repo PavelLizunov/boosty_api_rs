@@ -1,0 +1,57 @@
+{
+  "data": [
+    {
+      "id": 22309754,
+      "dialogId": 3323943,
+      "createdAt": 1736239576,
+      "authorId": 35206396,
+      "isRead": true,
+      "isPaid": false,
+      "isDeleted": false,
+      "isFeePaid": false,
+      "payWall": false,
+      "price": 0,
+      "previewType": "text",
+      "currencyPrices": { "RUB": 0, "USD": 0 },
+      "teaser": [],
+      "data": [
+        { "type": "text", "modificator": "", "content": "[\"Welcome!\",\"unstyled\",[]]" },
+        { "type": "link", "explicit": false, "content": "[\"https://t.me/ninitux\",\"unstyled\",[]]", "url": "https://t.me/ninitux" },
+        { "type": "text", "modificator": "BLOCK_END", "content": "" }
+      ],
+      "attachments": {
+        "text": { "count": 2 },
+        "files": { "count": 0 },
+        "audios": { "count": 0 },
+        "images": { "count": 0, "previewUrl": "" },
+        "videos": { "count": 0, "previewUrl": "" }
+      }
+    },
+    {
+      "id": 43887558,
+      "dialogId": 3323943,
+      "createdAt": 1736240000,
+      "authorId": 7597253,
+      "isRead": true,
+      "isPaid": false,
+      "isDeleted": false,
+      "isFeePaid": false,
+      "payWall": false,
+      "price": 0,
+      "previewType": "text",
+      "currencyPrices": { "RUB": 0, "USD": 0 },
+      "teaser": [],
+      "data": [
+        { "type": "text", "modificator": "", "content": "[\"Thanks!\",\"unstyled\",[]]" }
+      ],
+      "attachments": {
+        "text": { "count": 1 },
+        "files": { "count": 0 },
+        "audios": { "count": 0 },
+        "images": { "count": 0, "previewUrl": "" },
+        "videos": { "count": 0, "previewUrl": "" }
+      }
+    }
+  ],
+  "extra": { "isLast": true, "offset": 43887558 }
+}

@@ -6,6 +6,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
+/// Max chars of a failed-refresh response body kept in `AuthError::HttpStatus`.
+/// Enough to see the OAuth error code, short enough to not leak echoed params.
+const REFRESH_ERROR_BODY_MAX_CHARS: usize = 200;
+
+/// Synchronous, dependency-free callback that durably stores a rotated
+/// `(refresh_token, device_id)` pair. Invoked under the state lock on every
+/// successful refresh, before the new credentials become visible; an error
+/// aborts the refresh with a redacted [`AuthError`].
+type TokenPersister = dyn Fn(&str, &str) -> std::io::Result<()> + Send + Sync;
+
 /// Response body for token refresh endpoint.
 #[derive(Deserialize)]
 struct RefreshResponse {
@@ -18,7 +28,6 @@ struct RefreshResponse {
 }
 
 /// Internal state for authentication.
-#[derive(Debug)]
 struct AuthState {
     /// Static access token, if set via `set_access_token_only`.
     static_access_token: Option<String>,
@@ -30,6 +39,24 @@ struct AuthState {
     access_token: Option<String>,
     /// Expiration instant for `access_token`.
     expires_at: Option<Instant>,
+    /// Optional durable sink for rotated `(refresh_token, device_id)` pairs.
+    persister: Option<Arc<TokenPersister>>,
+}
+
+/// Manual Debug: never print credential values, only whether they are set.
+impl std::fmt::Debug for AuthState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn redact(value: &Option<String>) -> &'static str {
+            if value.is_some() { "Some(***)" } else { "None" }
+        }
+        f.debug_struct("AuthState")
+            .field("static_access_token", &redact(&self.static_access_token))
+            .field("device_id", &redact(&self.device_id))
+            .field("refresh_token", &redact(&self.refresh_token))
+            .field("access_token", &redact(&self.access_token))
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
 }
 
 /// Provider managing authentication: either static token or refresh-token flow.
@@ -51,6 +78,7 @@ impl AuthProvider {
             refresh_token: None,
             access_token: None,
             expires_at: None,
+            persister: None,
         };
         Self {
             client,
@@ -100,6 +128,7 @@ impl AuthProvider {
         st.refresh_token = None;
         st.access_token = None;
         st.expires_at = None;
+        st.persister = None;
         Ok(())
     }
 
@@ -123,6 +152,37 @@ impl AuthProvider {
         st.device_id = Some(device_id);
         st.access_token = None;
         st.expires_at = None;
+        st.persister = None;
+        Ok(())
+    }
+
+    /// Configure refresh credentials together with a durable rotation sink.
+    ///
+    /// The sink runs synchronously under the authentication lock after Boosty
+    /// rotates the token and before the refreshed access token can authorize
+    /// the original request. Long-running clients should use this method.
+    pub async fn set_refresh_token_and_device_id_with_persister<F>(
+        &self,
+        refresh: String,
+        device_id: String,
+        persister: F,
+    ) -> ResultAuth<()>
+    where
+        F: Fn(&str, &str) -> std::io::Result<()> + Send + Sync + 'static,
+    {
+        if refresh.is_empty() {
+            return Err(AuthError::EmptyRefreshToken);
+        }
+        if device_id.is_empty() {
+            return Err(AuthError::EmptyDeviceId);
+        }
+        let mut st = self.state.lock().await;
+        st.static_access_token = None;
+        st.refresh_token = Some(refresh);
+        st.device_id = Some(device_id);
+        st.access_token = None;
+        st.expires_at = None;
+        st.persister = Some(Arc::new(persister));
         Ok(())
     }
 
@@ -157,6 +217,26 @@ impl AuthProvider {
         }
     }
 
+    /// Force a token refresh regardless of the locally tracked expiry.
+    ///
+    /// Used when the server rejects a token that still looks valid locally.
+    /// Returns `AuthError::MissingCredentials` if the refresh flow is not configured.
+    pub async fn force_refresh(&self) -> ResultAuth<()> {
+        let mut st = self.state.lock().await;
+        if st.refresh_token.is_none() || st.device_id.is_none() {
+            return Err(AuthError::MissingCredentials);
+        }
+        self.refresh_internal(&mut st).await
+    }
+
+    /// Current refresh token, if the refresh flow is configured.
+    ///
+    /// The server rotates it on every successful refresh; expose it so callers
+    /// can persist the rotated value.
+    pub async fn refresh_token(&self) -> Option<String> {
+        self.state.lock().await.refresh_token.clone()
+    }
+
     /// Internal method to perform token refresh via HTTP request.
     ///
     /// Updates `st.access_token`, `st.refresh_token`, and `st.expires_at`.
@@ -182,16 +262,36 @@ impl AuthProvider {
 
         if resp.status() != StatusCode::OK {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+            // Keep only a short prefix of the body: OAuth error responses may
+            // echo request parameters (incl. the refresh token), and this
+            // error's Display ends up in caller logs.
+            let body: String = resp
+                .text()
+                .await
+                .unwrap_or_default()
+                .chars()
+                .take(REFRESH_ERROR_BODY_MAX_CHARS)
+                .collect();
             return Err(AuthError::HttpStatus { status, body });
         }
 
         let data: RefreshResponse = resp.json().await.map_err(AuthError::HttpRequest)?;
         let now = Instant::now();
 
-        st.access_token = Some(data.access_token.clone());
-        st.refresh_token = Some(data.refresh_token.clone());
-        st.expires_at = Some(now + Duration::from_secs(data.expires_in as u64));
+        if let Some(persister) = &st.persister
+            && let Err(error) = persister(&data.refresh_token, &device_id)
+        {
+            // Boosty has already rotated the lineage. Keep the new token only
+            // in memory for recovery, but never authorize the original request.
+            st.refresh_token = Some(data.refresh_token);
+            st.access_token = None;
+            st.expires_at = None;
+            return Err(AuthError::TokenPersist(error.kind()));
+        }
+
+        st.access_token = Some(data.access_token);
+        st.refresh_token = Some(data.refresh_token);
+        st.expires_at = Some(now + Duration::from_secs(data.expires_in.max(0) as u64));
         Ok(())
     }
 
@@ -214,6 +314,7 @@ impl AuthProvider {
         st.device_id = None;
         st.access_token = None;
         st.expires_at = None;
+        st.persister = None;
     }
 }
 

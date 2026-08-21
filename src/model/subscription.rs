@@ -27,10 +27,18 @@ pub struct Subscription {
     pub parent_id: Option<u64>,
     /// Display name of the subscription.
     pub name: String,
-    /// Standard price (in base currency units).
-    pub price: u64,
-    /// Custom price, if applied.
-    pub custom_price: u64,
+    /// Standard price (in base currency units). Fractional values occur on the live API.
+    pub price: f64,
+    /// Custom price, if applied. Absent on the live API when not set.
+    pub custom_price: Option<f64>,
+    /// Price per currency (e.g. "RUB", "USD"). Absent on some responses.
+    pub currency_prices: Option<HashMap<String, f64>>,
+    /// Whether the subscription can be paused.
+    pub can_be_paused: Option<bool>,
+    /// Whether manual recurrent payments are allowed.
+    pub can_manual_recurrent: Option<bool>,
+    /// Paused state (the live API carries both `isPause` and `isPaused`).
+    pub is_paused: Option<bool>,
     /// Billing period in months.
     pub period: u8,
     /// Start timestamp (Unix epoch).
@@ -69,8 +77,8 @@ pub struct SubscriptionLevelInfo {
     pub id: u64,
     /// Name of the level.
     pub name: String,
-    /// Base price in main currency.
-    pub price: u64,
+    /// Base price in main currency. Fractional values occur on the live API.
+    pub price: f64,
     /// Price per currency (e.g., USD, EUR).
     pub currency_prices: HashMap<String, f64>,
     /// Whether the level has limited availability.
@@ -101,6 +109,10 @@ pub struct BlogInfo {
     pub cover_url: String,
     /// Whether the blog contains adult content.
     pub has_adult_content: bool,
+    /// Blog's base currency (e.g. "RUB").
+    pub currency: Option<String>,
+    /// Currencies the blog accepts.
+    pub accepted_currencies: Option<Vec<String>>,
     /// Blog owner information.
     pub owner: BlogOwner,
     /// Feature flags for the blog.
@@ -119,6 +131,8 @@ pub struct BlogOwner {
     pub has_avatar: bool,
     /// URL of the avatar.
     pub avatar_url: String,
+    /// Whether this is an official account.
+    pub is_official: Option<bool>,
 }
 
 /// Blog feature flags.
@@ -145,4 +159,8 @@ pub struct BlogFlags {
     pub accept_donation_messages: bool,
     /// Whether RSS feed is enabled.
     pub is_rss_feed_enabled: bool,
+    /// Whether content sale is disabled.
+    pub is_content_sale_disabled: Option<bool>,
+    /// Whether the showcase is enabled.
+    pub is_showcase_enabled: Option<bool>,
 }

@@ -8,10 +8,10 @@ pub struct CurrencyPrices {
     #[serde(alias = "EUR", default)]
     pub eur: f32,
     /// Price in Russian Rubles.
-    #[serde(alias = "RUB")]
+    #[serde(alias = "RUB", default)]
     pub rub: f32,
     /// Price in US Dollars.
-    #[serde(alias = "USD")]
+    #[serde(alias = "USD", default)]
     pub usd: f32,
 }
 

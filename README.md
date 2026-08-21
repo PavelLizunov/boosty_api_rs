@@ -44,16 +44,16 @@ Use with caution in production environments and pin specific versions if needed.
 ### 🔐 Authentication
 
 - Static bearer token or refresh-token + device ID (OAuth2-like).
-- Automatic token refresh and retry on expiration.
+- Automatic token refresh with durable rotation support.
 - Clean separation of `AuthProvider` logic.
 
 ### 🔁 Retry Behavior
 
-The client automatically retries HTTP requests that fail due to transient network errors or expired access tokens.
-
-- Retry logic is centralized in the `get_request()` method.
-- On token expiration, the client performs a refresh (if refresh-token and device ID are set) and retries the request.
-- Other error types (like 4xx or business-logic errors) are not retried.
+- All requests go through a single authorized-send path.
+- Before each request the access token is refreshed proactively when it is about to expire.
+- If a GET still answers `401 Unauthorized` and refresh credentials are configured, the client forces one refresh and retries that read once.
+- POST, PUT, DELETE, and multipart requests are never retried by the SDK because the remote mutation may already have happened.
+- Other error statuses (4xx/5xx) are not retried.
 
 ### 📝 Post API
 
@@ -79,7 +79,7 @@ The client automatically retries HTTP requests that fail due to transient networ
 
 ### 📜 Subscriptions
 
-- Get subscription levels via `get_subscription_levels(blog_name, show_free_level)`.
+- Get subscription levels via `get_blog_subscription_levels(blog_name, show_free_level)`.
 - Get current user subscriptions via `get_user_subscriptions(limit, with_follow)`, returning a paginated
   `SubscriptionsResponse`.
 
@@ -93,9 +93,29 @@ The client automatically retries HTTP requests that fail due to transient networ
 - Get bundles via `get_bundles(blog_name)`.
 - Get bundle via `get_bundle(blog_name, bundle_id, query)`.
 
+### ✉️ Direct Messages
+
+- List dialogs via `get_dialogs(limit, offset)`.
+- Get one page of messages via `get_dialog_messages(dialog_id, limit, offset)`.
+- Get all messages in a dialog via `get_all_dialog_messages(dialog_id, limit)`.
+- Send a message into an existing dialog via `send_message(dialog_id, blocks)`
+  (reuses `CommentBlock` for the body).
+- Message content reuses `MediaData` and implements `HasContent`.
+
+### 👥 Subscribers
+
+- Get a page of your blog's subscribers via
+  `get_subscribers(blog_name, limit, offset, sort_by, order)`.
+- Get all subscribers via `get_all_subscribers(blog_name, sort_by, order)`.
+
+Both require an authenticated client that owns the blog.
+
 ### ⚙️ Low-level Features
 
-- Async-ready `ApiClient` using `reqwest`.
+- Async-ready `ApiClient` using `reqwest`. Build the `Client` with
+  `connect_timeout` + `timeout` (see examples): token refresh runs under an
+  internal lock, and a hung connection without timeouts stalls every request
+  on the client.
 - Custom headers with real-world `User-Agent`, `DNT`, `Cache-Control`, etc.
 - Unified error types: `ApiError`, `AuthError` with detailed variants.
 
@@ -119,10 +139,16 @@ cargo add boosty_api
 ```rust
 use boosty_api::api_client::ApiClient;
 use reqwest::Client;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::new();
+    // Always set timeouts: the token refresh runs under an internal lock, so
+    // a single hung connection would otherwise stall the whole client.
+    let client = Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()?;
     let base_url = "https://api.example.com";
 
     let api_client = ApiClient::new(client, base_url);
@@ -145,10 +171,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```rust
 use boosty_api::api_client::ApiClient;
 use reqwest::Client;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::new();
+    // Always set timeouts: the token refresh runs under an internal lock, so
+    // a single hung connection would otherwise stall the whole client.
+    let client = Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()?;
     let base_url = "https://api.example.com";
 
     let api_client = ApiClient::new(client, base_url);
@@ -260,7 +292,22 @@ api_client.set_bearer_token("access-token").await?;
 api_client.set_refresh_token_and_device_id("refresh-token", "device-id").await?;
 ```
 
-If a post is unavailable and refresh credentials are present, the client will automatically attempt a refresh.
+This compatibility method is suitable only when crash-safe rotation is not required. Long-running services must register a durable callback instead:
+
+```rust,ignore
+api_client
+    .set_refresh_token_and_device_id_with_persister(
+        "refresh-token",
+        "device-id",
+        |rotated_refresh_token, device_id| {
+            // Durably and atomically replace the stored credential pair here.
+            persist_credentials(rotated_refresh_token, device_id)
+        },
+    )
+    .await?;
+```
+
+The callback completes before a rotated credential can authorize the original request. If it fails, the request fails closed. Saving `refresh_token()` only after a request leaves a crash window and is not safe for a persistent service.
 
 ## Crate Structure
 

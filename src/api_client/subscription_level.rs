@@ -1,4 +1,4 @@
-use crate::api_client::ApiClient;
+use crate::api_client::{ApiClient, encode_segment};
 use crate::error::ResultApi;
 use crate::model::SubscriptionLevelResponse;
 
@@ -19,14 +19,13 @@ impl ApiClient {
     /// # Errors
     ///
     /// - `ApiError::HttpRequest` if the network request fails.
-    /// - `ApiError::JsonParse` if the HTTP response cannot be parsed as JSON.
-    /// - `ApiError::Deserialization` if the body cannot be deserialized into `SubscriptionLevelResponse`.
+    /// - `ApiError::JsonParseDetailed` if the body cannot be parsed into a `SubscriptionLevelResponse`.
     pub async fn get_blog_subscription_levels(
         &self,
         blog_name: &str,
         show_free_level: Option<bool>,
     ) -> ResultApi<SubscriptionLevelResponse> {
-        let mut path = format!("blog/{blog_name}/subscription_level/");
+        let mut path = format!("blog/{}/subscription_level/", encode_segment(blog_name));
         if let Some(flag) = show_free_level {
             path.push_str(&format!("?show_free_level={flag}"));
         }

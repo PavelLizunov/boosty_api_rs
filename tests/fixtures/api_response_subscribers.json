@@ -1,0 +1,72 @@
+{
+  "data": [
+    {
+      "id": 40592781,
+      "name": "Oleg P",
+      "email": "user@example.com",
+      "hasAvatar": true,
+      "avatarUrl": "https://images.boosty.to/user/40592781/avatar",
+      "isOfficial": false,
+      "isBlackListed": false,
+      "isFeePaid": false,
+      "canWrite": true,
+      "subscribed": true,
+      "status": "active",
+      "onTime": 1783624586,
+      "price": 0,
+      "payments": 7560,
+      "level": {
+        "id": 2990987,
+        "name": "Follower",
+        "price": 0,
+        "currencyPrices": { "RUB": 0, "USD": 0 },
+        "createdAt": 1728308786,
+        "ownerId": 35206396,
+        "deleted": false,
+        "isHidden": false,
+        "isLimited": false,
+        "isArchived": false,
+        "flags": { "isHidden": false, "isLimited": false, "isArchived": false },
+        "data": []
+      }
+    },
+    {
+      "id": 40592782,
+      "name": "No Email User",
+      "email": "",
+      "hasAvatar": false,
+      "avatarUrl": "",
+      "isOfficial": false,
+      "isBlackListed": false,
+      "isFeePaid": true,
+      "canWrite": false,
+      "subscribed": true,
+      "status": "inactive",
+      "onTime": 1783624000,
+      "offTime": 1790000000,
+      "nextPayTime": 1793000000,
+      "price": 300.5,
+      "payments": 901.25,
+      "level": {
+        "id": 2990988,
+        "name": "Penguin",
+        "price": 300.5,
+        "currencyPrices": { "RUB": 300.5, "USD": 3.2 },
+        "createdAt": 1728308000,
+        "ownerId": 35206396,
+        "deleted": false,
+        "isHidden": false,
+        "isLimited": true,
+        "isArchived": false,
+        "flags": { "isHidden": false, "isLimited": true, "isArchived": false },
+        "data": [],
+        "archivedAt": null,
+        "parentId": 2990987,
+        "parent": null
+      }
+    }
+  ],
+  "total": 2,
+  "limit": 100,
+  "offset": 0
+}

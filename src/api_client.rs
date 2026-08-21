@@ -1,7 +1,9 @@
 mod bundle;
 mod comment;
+mod dialog;
 mod post;
 mod showcase;
+mod subscriber;
 mod subscription_level;
 mod target;
 mod user;
@@ -9,25 +11,56 @@ mod user;
 use crate::auth_provider::AuthProvider;
 use crate::error::{ApiError, ResultApi, ResultAuth};
 use reqwest::header::{ACCEPT, CACHE_CONTROL, HeaderMap, HeaderValue, USER_AGENT};
-use reqwest::{Client, Response, multipart};
+use reqwest::{Client, RequestBuilder, Response, StatusCode, multipart};
 
 /// Default number of posts to fetch per page.
 const DEFAULT_PAGE_SIZE: usize = 20;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RequestPolicy {
+    Read,
+    Mutation,
+}
+
+/// Percent-encode a value for interpolation into a URL path segment or query
+/// value (RFC 3986: unreserved characters pass through, everything else is
+/// `%XX`-encoded byte-wise). Values like blog urls can come from API
+/// responses; unencoded `/`, `?`, `#` in them would reroute the request.
+pub(crate) fn encode_segment(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
 
 /// Client for interacting with Boosty API.
 ///
 /// Handles base URL, common headers, and delegates authentication to `AuthProvider`.
 /// Provides methods to get a single post or multiple posts.
 ///
+/// Always build the `reqwest::Client` with timeouts: the token refresh runs
+/// under an internal lock, so with no timeout a single hung connection stalls
+/// every request on this client indefinitely.
+///
 /// # Examples
 ///
 /// ```rust,no_run
 /// use boosty_api::api_client::ApiClient;
 /// use reqwest::Client;
+/// use std::time::Duration;
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let client = Client::new();
+///     let client = Client::builder()
+///         .connect_timeout(Duration::from_secs(10))
+///         .timeout(Duration::from_secs(30))
+///         .build()?;
 ///     let base_url = "https://api.example.com";
 ///     let api_client = ApiClient::new(client, base_url);
 ///
@@ -136,6 +169,28 @@ impl ApiClient {
             .await
     }
 
+    /// Configure refresh credentials with durable rotation persistence.
+    ///
+    /// The persister runs under the authentication lock before a refreshed
+    /// access token can authorize the original request.
+    pub async fn set_refresh_token_and_device_id_with_persister<F>(
+        &self,
+        refresh_token: &str,
+        device_id: &str,
+        persister: F,
+    ) -> ResultAuth<()>
+    where
+        F: Fn(&str, &str) -> std::io::Result<()> + Send + Sync + 'static,
+    {
+        self.auth_provider
+            .set_refresh_token_and_device_id_with_persister(
+                refresh_token.to_string(),
+                device_id.to_string(),
+                persister,
+            )
+            .await
+    }
+
     /// Clear refresh token and device ID (disables refresh flow).
     pub async fn clear_refresh_and_device_id(&self) {
         self.auth_provider.clear_refresh_and_device_id().await
@@ -164,6 +219,53 @@ impl ApiClient {
             .collect()
     }
 
+    /// Current refresh token, if the refresh flow is configured.
+    ///
+    /// This is a compatibility/diagnostic accessor. Long-running processes
+    /// must use `set_refresh_token_and_device_id_with_persister`; saving this
+    /// value after a request leaves a crash window.
+    pub async fn refresh_token(&self) -> Option<String> {
+        self.auth_provider.refresh_token().await
+    }
+
+    /// Internal: attach default + auth headers and send. Read requests may
+    /// force one refresh and retry after 401; mutations never retry here.
+    async fn send_authorized(
+        &self,
+        builder: RequestBuilder,
+        policy: RequestPolicy,
+    ) -> ResultApi<Response> {
+        let mut headers = self.headers.clone();
+        self.auth_provider.apply_auth_header(&mut headers).await?;
+        let builder = builder.headers(headers);
+        let retry_builder = (policy == RequestPolicy::Read)
+            .then(|| builder.try_clone())
+            .flatten();
+
+        let response = builder.send().await.map_err(ApiError::HttpRequest)?;
+
+        if response.status() == StatusCode::UNAUTHORIZED
+            && self.auth_provider.has_refresh_and_device_id().await
+            && let Some(retry) = retry_builder
+        {
+            self.auth_provider.force_refresh().await?;
+            let mut headers = self.headers.clone();
+            self.auth_provider.apply_auth_header(&mut headers).await?;
+            return retry
+                .headers(headers)
+                .send()
+                .await
+                .map_err(ApiError::HttpRequest);
+        }
+
+        Ok(response)
+    }
+
+    /// Internal: build the full URL for a relative API path under `/v1/`.
+    fn url(&self, path: &str) -> String {
+        format!("{}/v1/{}", self.base_url, path)
+    }
+
     /// Internal: perform a GET request to given API path, applying auth header.
     ///
     /// # Parameters
@@ -174,16 +276,8 @@ impl ApiClient {
     ///
     /// On success, returns `reqwest::Response`. On network error, returns `ApiError::HttpRequest`.
     async fn get_request(&self, path: &str) -> ResultApi<Response> {
-        let mut headers = self.headers.clone();
-        self.auth_provider.apply_auth_header(&mut headers).await?;
-
-        let url = format!("{}/v1/{}", self.base_url, path);
-        self.client
-            .get(&url)
-            .headers(headers)
-            .send()
+        self.send_authorized(self.client.get(self.url(path)), RequestPolicy::Read)
             .await
-            .map_err(ApiError::HttpRequest)
     }
 
     /// Internal: perform a POST request with optional form or JSON body.
@@ -198,7 +292,7 @@ impl ApiClient {
     ///
     /// # Returns
     ///
-    /// On success, returns a `reqwest::Response`.  
+    /// On success, returns a `reqwest::Response`.
     /// On network failure, returns [`ApiError::HttpRequest`].
     async fn post_request<T: serde::Serialize + ?Sized>(
         &self,
@@ -206,25 +300,19 @@ impl ApiClient {
         body: &T,
         as_form: bool,
     ) -> ResultApi<Response> {
-        let mut headers = self.headers.clone();
-        self.auth_provider.apply_auth_header(&mut headers).await?;
-
-        let url = format!("{}/v1/{}", self.base_url, path);
-
-        let builder = self.client.post(&url).headers(headers);
-
-        let request = if as_form {
+        let builder = self.client.post(self.url(path));
+        let builder = if as_form {
             builder.form(body)
         } else {
             builder.json(body)
         };
-
-        request.send().await.map_err(ApiError::HttpRequest)
+        self.send_authorized(builder, RequestPolicy::Mutation).await
     }
 
     /// Internal: perform a POST request with multipart form.
     ///
     /// Automatically applies authentication headers and prepends the base URL (`/v1/` prefix).
+    /// Multipart bodies are streamed, so these requests are not retried on 401.
     ///
     /// # Parameters
     ///
@@ -233,19 +321,14 @@ impl ApiClient {
     ///
     /// # Returns
     ///
-    /// On success, returns a `reqwest::Response`.  
+    /// On success, returns a `reqwest::Response`.
     /// On network failure, returns [`ApiError::HttpRequest`].
     async fn post_multipart(&self, path: &str, form: multipart::Form) -> ResultApi<Response> {
-        let mut headers = self.headers.clone();
-        self.auth_provider.apply_auth_header(&mut headers).await?;
-
-        headers.remove("Content-Type");
-
-        let url = format!("{}/v1/{}", self.base_url, path);
-
-        let request = self.client.post(&url).headers(headers).multipart(form);
-
-        request.send().await.map_err(ApiError::HttpRequest)
+        self.send_authorized(
+            self.client.post(self.url(path)).multipart(form),
+            RequestPolicy::Mutation,
+        )
+        .await
     }
 
     /// Internal: perform a DELETE request to the given API path.
@@ -258,20 +341,11 @@ impl ApiClient {
     ///
     /// # Returns
     ///
-    /// On success, returns a `reqwest::Response`.  
+    /// On success, returns a `reqwest::Response`.
     /// On network failure, returns [`ApiError::HttpRequest`].
     async fn delete_request(&self, path: &str) -> ResultApi<Response> {
-        let mut headers = self.headers.clone();
-        self.auth_provider.apply_auth_header(&mut headers).await?;
-
-        let url = format!("{}/v1/{}", self.base_url, path);
-
-        self.client
-            .delete(&url)
-            .headers(headers)
-            .send()
+        self.send_authorized(self.client.delete(self.url(path)), RequestPolicy::Mutation)
             .await
-            .map_err(ApiError::HttpRequest)
     }
 
     /// Internal: perform a PUT request with optional form or JSON body.
@@ -286,7 +360,7 @@ impl ApiClient {
     ///
     /// # Returns
     ///
-    /// On success, returns a `reqwest::Response`.  
+    /// On success, returns a `reqwest::Response`.
     /// On network failure, returns [`ApiError::HttpRequest`].
     async fn put_request<T: serde::Serialize + ?Sized>(
         &self,
@@ -294,19 +368,27 @@ impl ApiClient {
         body: &T,
         as_form: bool,
     ) -> ResultApi<Response> {
-        let mut headers = self.headers.clone();
-        self.auth_provider.apply_auth_header(&mut headers).await?;
-
-        let url = format!("{}/v1/{}", self.base_url, path);
-
-        let builder = self.client.put(&url).headers(headers);
-
-        let request = if as_form {
+        let builder = self.client.put(self.url(path));
+        let builder = if as_form {
             builder.form(body)
         } else {
             builder.json(body)
         };
+        self.send_authorized(builder, RequestPolicy::Mutation).await
+    }
+}
 
-        request.send().await.map_err(ApiError::HttpRequest)
+#[cfg(test)]
+mod tests {
+    use super::encode_segment;
+
+    #[test]
+    fn encode_segment_passes_unreserved_and_encodes_the_rest() {
+        assert_eq!(encode_segment("plain-slug_1.2~"), "plain-slug_1.2~");
+        assert_eq!(encode_segment("a/b?c#d"), "a%2Fb%3Fc%23d");
+        assert_eq!(
+            encode_segment("привет"),
+            "%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82"
+        );
     }
 }

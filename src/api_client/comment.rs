@@ -1,7 +1,8 @@
 use reqwest::multipart::{Form, Part};
+use std::collections::HashSet;
 
 use crate::{
-    api_client::ApiClient,
+    api_client::{ApiClient, encode_segment},
     error::{ApiError, ResultApi},
     model::{Comment, CommentBlock, CommentsResponse},
 };
@@ -37,7 +38,11 @@ impl ApiClient {
         order: Option<&str>,
         offset: Option<u64>,
     ) -> ResultApi<CommentsResponse> {
-        let mut path = format!("blog/{blog_name}/post/{post_id}/comment/");
+        let mut path = format!(
+            "blog/{}/post/{}/comment/",
+            encode_segment(blog_name),
+            encode_segment(post_id)
+        );
 
         let mut params = Vec::new();
         if let Some(o) = offset {
@@ -50,7 +55,7 @@ impl ApiClient {
             params.push(format!("reply_limit={rl}"));
         }
         if let Some(ord) = order {
-            params.push(format!("order={ord}"));
+            params.push(format!("order={}", encode_segment(ord)));
         }
 
         if !params.is_empty() {
@@ -93,6 +98,7 @@ impl ApiClient {
         order: Option<&str>,
     ) -> ResultApi<Vec<Comment>> {
         let mut all_comments = Vec::new();
+        let mut seen = HashSet::new();
         let mut offset: Option<u64> = None;
 
         loop {
@@ -101,14 +107,43 @@ impl ApiClient {
                 .await?;
 
             if resp.data.is_empty() {
-                break;
+                if resp.extra.is_last && resp.extra.is_first {
+                    break;
+                }
+                return Err(ApiError::Pagination {
+                    resource: "comments",
+                    reason: "empty nonterminal page",
+                });
             }
 
             let last_id = resp.data.last().map(|c| c.int_id);
+            let terminal = resp.extra.is_last && resp.extra.is_first;
 
-            all_comments.extend(resp.data);
+            if !terminal && last_id == offset {
+                return Err(ApiError::Pagination {
+                    resource: "comments",
+                    reason: "offset did not advance",
+                });
+            }
 
-            if resp.extra.is_last && resp.extra.is_first {
+            for comment in resp.data {
+                if !seen.insert(comment.int_id) {
+                    return Err(ApiError::Pagination {
+                        resource: "comments",
+                        reason: "duplicate item",
+                    });
+                }
+                all_comments.push(comment);
+            }
+
+            // Live-API semantics (verified against api.boosty.to, 2026-07): the
+            // extra flags are chronological, not directional. With the default
+            // ("top") order isFirst is true on every page and isLast flips to
+            // true on the final one; with "bottom" order it is mirrored
+            // (isLast always true, isFirst flips on the final page). So in
+            // either order the terminal page is exactly `is_first && is_last`;
+            // the empty-page check above stays as a safety net.
+            if terminal {
                 break;
             }
 
@@ -149,7 +184,11 @@ impl ApiClient {
         blocks: &[CommentBlock],
         reply_id: Option<u64>,
     ) -> ResultApi<Comment> {
-        let path = format!("blog/{blog_name}/post/{post_id}/comment/");
+        let path = format!(
+            "blog/{}/post/{}/comment/",
+            encode_segment(blog_name),
+            encode_segment(post_id)
+        );
 
         let mut form = Form::new().text("from_page", "blog");
 

@@ -1,6 +1,7 @@
-use crate::api_client::{ApiClient, DEFAULT_PAGE_SIZE};
-use crate::error::ResultApi;
+use crate::api_client::{ApiClient, DEFAULT_PAGE_SIZE, encode_segment};
+use crate::error::{ApiError, ResultApi};
 use crate::model::{Post, PostsResponse};
+use std::collections::HashSet;
 
 impl ApiClient {
     /// Get a single post once, without automatic retry on "not available" or HTTP 401.
@@ -21,7 +22,11 @@ impl ApiClient {
     /// - `ApiError::HttpRequest` if the HTTP request fails.
     /// - `ApiError::JsonParseDetailed` if the response body cannot be parsed into a `Post`.
     pub async fn get_post(&self, blog_name: &str, post_id: &str) -> ResultApi<Post> {
-        let path = format!("blog/{blog_name}/post/{post_id}");
+        let path = format!(
+            "blog/{}/post/{}",
+            encode_segment(blog_name),
+            encode_segment(post_id)
+        );
 
         let response = self.get_request(&path).await?;
         let response = self.handle_response(&path, response).await?;
@@ -29,40 +34,25 @@ impl ApiClient {
         self.parse_json(response).await
     }
 
-    // pub async fn get_posts(&self, blog_name: &str, limit: usize) -> ResultApi<PostsResponse> {
-    //     let path = format!("blog/{blog_name}/post/?limit={limit}");
-    //     let response = self.get_request(&path).await?;
-    //     let status = response.status();
-
-    //     if status == 401 {
-    //         return Err(ApiError::Unauthorized);
-    //     }
-
-    //     let posts_response = response
-    //         .json::<PostsResponse>()
-    //         .await
-    //         .map_err(ApiError::JsonParse)?;
-    //     Ok(posts_response)
-    // }
-
     /// Get multiple posts for a blog.
     ///
     /// # Parameters
     ///
     /// - `blog_name`: blog identifier/name.
-    /// - `limit`: number of posts to fetch.
+    /// - `limit`: maximum number of posts to return.
     /// - `page_size`: number of posts to fetch per page. Defaults to 20.
     /// - `start_offset`: offset to start fetching posts from. Defaults from first post.
     ///
     /// # Returns
     ///
-    /// On success, returns a `PostsResponse` containing the `data` field with `Post` items.
+    /// On success, returns at most `limit` `Post` items.
     ///
     /// # Errors
     ///
+    /// - `ApiError::Unauthorized` if the HTTP status is 401 Unauthorized.
+    /// - `ApiError::HttpStatus` for other non-success HTTP statuses.
     /// - `ApiError::HttpRequest` if the HTTP request fails.
-    /// - `ApiError::JsonParse` if the HTTP response cannot be parsed as JSON.
-    /// - `ApiError::Deserialization` if the `"data"` field cannot be deserialized into a vector of `Post`
+    /// - `ApiError::JsonParseDetailed` if a response body cannot be parsed into a `PostsResponse`.
     pub async fn get_posts(
         &self,
         blog_name: &str,
@@ -70,16 +60,26 @@ impl ApiClient {
         page_size: Option<usize>,
         start_offset: Option<String>,
     ) -> ResultApi<Vec<Post>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let page_size = page_size.unwrap_or(DEFAULT_PAGE_SIZE);
 
         let mut all_posts = Vec::new();
+        let mut seen = HashSet::new();
         let mut offset = start_offset;
 
         loop {
             let current_limit = page_size.min(limit - all_posts.len());
-            let mut path = format!("blog/{blog_name}/post/?limit={current_limit}");
+            let mut path = format!(
+                "blog/{}/post/?limit={current_limit}",
+                encode_segment(blog_name)
+            );
+            // The offset string is echoed back from the previous response —
+            // server data, so it gets encoded like any other input.
             if let Some(ref off) = offset {
-                path.push_str(&format!("&offset={off}"));
+                path.push_str(&format!("&offset={}", encode_segment(off)));
             }
 
             let response = self.get_request(&path).await?;
@@ -88,15 +88,39 @@ impl ApiClient {
             let posts_response: PostsResponse = self.parse_json(response).await?;
 
             let data_len = posts_response.data.len();
-            all_posts.extend(posts_response.data);
+            for post in posts_response.data {
+                if !seen.insert(post.id.clone()) {
+                    return Err(ApiError::Pagination {
+                        resource: "posts",
+                        reason: "duplicate item",
+                    });
+                }
+                all_posts.push(post);
+            }
 
-            if posts_response.extra.is_last || all_posts.len() >= limit || data_len == 0 {
+            if posts_response.extra.is_last || all_posts.len() >= limit {
                 break;
             }
 
-            offset = Some(posts_response.extra.offset);
+            if data_len == 0 {
+                return Err(ApiError::Pagination {
+                    resource: "posts",
+                    reason: "empty nonterminal page",
+                });
+            }
+
+            let next_offset = Some(posts_response.extra.offset);
+            if next_offset == offset {
+                return Err(ApiError::Pagination {
+                    resource: "posts",
+                    reason: "offset did not advance",
+                });
+            }
+            offset = next_offset;
         }
 
+        // The server may over-deliver; never return more than asked for.
+        all_posts.truncate(limit);
         Ok(all_posts)
     }
 }

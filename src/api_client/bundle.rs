@@ -1,5 +1,5 @@
 use crate::{
-    api_client::ApiClient,
+    api_client::{ApiClient, encode_segment},
     error::{ApiError, ResultApi},
     model::{BundleItemsResponse, BundleQuery, BundlesResponse},
 };
@@ -19,7 +19,7 @@ impl ApiClient {
     /// * `ApiError::HttpRequest` if the HTTP request fails.
     /// * `ApiError::JsonParseDetailed` if the response body cannot be parsed into a `BundlesResponse`.
     pub async fn get_bundles(&self, blog_name: &str) -> ResultApi<BundlesResponse> {
-        let path = format!("blog/{blog_name}/bundle/");
+        let path = format!("blog/{}/bundle/", encode_segment(blog_name));
 
         let response = self.get_request(&path).await?;
         let response = self.handle_response(&path, response).await?;
@@ -51,7 +51,12 @@ impl ApiClient {
     ) -> ResultApi<BundleItemsResponse> {
         let query_string = serde_urlencoded::to_string(query).map_err(ApiError::Serialization)?;
 
-        let path = format!("blog/{blog_name}/bundle/{bundle_id}/post/?{query_string}");
+        // query_string is already urlencoded by serde_urlencoded — do not re-encode.
+        let path = format!(
+            "blog/{}/bundle/{}/post/?{query_string}",
+            encode_segment(blog_name),
+            encode_segment(bundle_id)
+        );
 
         let response = self.get_request(&path).await?;
         let response = self.handle_response(&path, response).await?;

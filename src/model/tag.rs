@@ -4,14 +4,14 @@ use serde::Deserialize;
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchTagsFullResponse {
-    pub extra: Extra,
+    pub extra: SearchTagsExtra,
     pub data: SearchTagsData,
 }
 
 /// Search tags extra data.
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct Extra {
+pub struct SearchTagsExtra {
     pub offset: String,
     pub is_last: bool,
 }

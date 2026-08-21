@@ -167,7 +167,8 @@ async fn test_delete_target_success() {
 }
 
 #[tokio::test]
-async fn test_delete_target_invalid_json() {
+async fn test_delete_target_ignores_response_body() {
+    // Success of DELETE is determined by the HTTP status; the body is ignored.
     let (mut server, base) = setup().await;
     let client = ApiClient::new(Client::new(), &base);
 
@@ -178,12 +179,48 @@ async fn test_delete_target_invalid_json() {
         .mock("DELETE", path.as_str())
         .with_status(200)
         .with_header(CONTENT_TYPE, "application/json")
-        .with_body("invalid json")
+        .with_body("not json at all")
         .create_async()
         .await;
 
     let result = client.delete_blog_target(target_id).await;
-    assert!(matches!(result, Err(ApiError::JsonParse(_))));
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_delete_target_unauthorized() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    let target_id = 790;
+    let path = api_path(format!("target/{}", target_id).as_str());
+
+    server
+        .mock("DELETE", path.as_str())
+        .with_status(401)
+        .create_async()
+        .await;
+
+    let result = client.delete_blog_target(target_id).await;
+    assert!(matches!(result, Err(ApiError::Unauthorized)));
+}
+
+#[tokio::test]
+async fn test_delete_target_http_error() {
+    let (mut server, base) = setup().await;
+    let client = ApiClient::new(Client::new(), &base);
+
+    let target_id = 791;
+    let path = api_path(format!("target/{}", target_id).as_str());
+
+    server
+        .mock("DELETE", path.as_str())
+        .with_status(500)
+        .create_async()
+        .await;
+
+    let result = client.delete_blog_target(target_id).await;
+    assert!(matches!(result, Err(ApiError::HttpStatus { .. })));
 }
 
 #[tokio::test]

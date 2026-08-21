@@ -1,9 +1,11 @@
 mod bundle;
 mod comment;
 mod common;
+mod dialog;
 mod post;
 mod reaction;
 mod showcase;
+mod subscriber;
 mod subscription;
 mod subscription_level;
 mod tag;
@@ -12,28 +14,46 @@ mod user;
 
 pub use bundle::{
     Bundle, BundleExtra, BundleItem, BundleItemsData, BundleItemsResponse, BundleQuery,
-    BundlesResponse,
+    BundlesData, BundlesResponse,
 };
 
 pub use common::{ContentCounter, CurrencyPrices, Thumbnail};
 
-pub use post::{
-    AudioData, Comments, Count, Donators, ExtraFlag, FileData, Flags, ImageData, LinkData,
-    MediaData, OkVideoData, PlayerUrl, Post, PostsResponse, SmileData, TextData, VideoData,
+pub use dialog::{
+    AttachmentCount, Chatmate, Dialog, DialogsExtra, DialogsResponse, MediaAttachmentCount,
+    Message, MessageAttachments, MessagesExtra, MessagesResponse,
 };
 
-pub use comment::{Comment, CommentBlock, CommentsResponse};
+pub use subscriber::{LevelFlags, Subscriber, SubscriberLevel, SubscribersResponse};
+
+pub use post::{
+    AudioData, Comments, Count, Donators, ExtraFlag, FileData, Flags, ImageData, LinkData,
+    ListData, ListItem, MediaData, OkVideoData, PlayerUrl, Post, PostsExtra, PostsResponse,
+    SmileData, TextData, VideoData,
+};
+
+pub use comment::{
+    Author, Comment, CommentBlock, CommentsExtra, CommentsResponse, PostRef, Replies, SmileBlock,
+    TextBlock,
+};
 
 pub use user::User;
 
 pub use reaction::{ReactionCounter, Reactions};
 
-pub use tag::{SearchTag, SearchTagsData, SearchTagsFullResponse, Tag, TagsResponse};
+pub use tag::{
+    SearchTag, SearchTagsData, SearchTagsExtra, SearchTagsFullResponse, Tag, TagsResponse,
+};
 
 pub use target::{NewTarget, Target, TargetResponse, TargetType, UpdateTarget};
 
-pub use subscription_level::{SubscriptionLevel, SubscriptionLevelResponse};
+pub use subscription_level::{
+    Access, DataBlock, DiscordApp, DiscordData, DiscordRole, Discount, ExternalApps, Promo,
+    PromoCount, SubscriptionLevel, SubscriptionLevelResponse, TelegramApp,
+};
 
-pub use subscription::{Subscription, SubscriptionsResponse};
+pub use subscription::{
+    BlogFlags, BlogInfo, BlogOwner, Subscription, SubscriptionLevelInfo, SubscriptionsResponse,
+};
 
-pub use showcase::{ShowcaseData, ShowcaseItem, ShowcaseResponse};
+pub use showcase::{Counters, ShowcaseData, ShowcaseExtra, ShowcaseItem, ShowcaseResponse};
